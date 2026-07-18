@@ -102,3 +102,6 @@ Akko_Cloud_v4_setup_370.2.17_WIN20251225.zip
 # Strings dump (large, can be regenerated)
 iot_driver_strings.txt
 iot_driver_devices.txt
+
+# Direnv
+/.direnv/
