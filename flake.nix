@@ -53,5 +53,17 @@
           };
         }
       );
+
+      packages = eachSystem (
+        system:
+        let
+          pkgs = pkgsFor.${system};
+        in
+        {
+          iot_driver_linux = pkgs.callPackage ./nix/iot_driver_linux.nix {
+            version = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
+          };
+        }
+      );
     };
 }
