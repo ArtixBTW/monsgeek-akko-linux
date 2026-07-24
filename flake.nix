@@ -49,6 +49,7 @@
               # For scripts
               nodejs_latest
               node-gyp
+              inputs.self.packages.${system}.webcrack
             ];
           };
         }
@@ -63,6 +64,8 @@
           iot_driver_linux = pkgs.callPackage ./nix/iot_driver_linux.nix {
             version = inputs.self.shortRev or inputs.self.dirtyShortRev or "unknown";
           };
+
+          webcrack = pkgs.callPackage ./nix/webcrack.nix { };
         }
       );
     };
