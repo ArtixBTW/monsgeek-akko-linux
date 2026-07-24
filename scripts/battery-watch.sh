@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Battery monitor script for charger testing
 # Prints full vendor response every second to observe byte changes
 # Usage: ./battery-watch.sh [interval_seconds]

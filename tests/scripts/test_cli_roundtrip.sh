@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # CLI Setting Roundtrip Tests
 # Tests set commands by verifying the get commands reflect changes
 

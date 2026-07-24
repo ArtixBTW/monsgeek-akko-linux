@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TUI Basic Tests
 # Tests TUI launch and basic key navigation using tmux
 #

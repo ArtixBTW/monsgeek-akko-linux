@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Load Akko dongle HID-BPF program for battery integration
 # This script should be owned by root with setuid: chown root:root && chmod 4755
 

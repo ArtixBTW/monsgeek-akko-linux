@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Battery monitor wrapper - run with sudo or add to sudoers
 # Updates test_power module parameters for UPower integration
 

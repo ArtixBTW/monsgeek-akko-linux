@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # MonsGeek/Epomaker/Akko/Womier IOT Driver — Download & Extraction Pipeline
 #
 # Unpacks a vendor Electron driver into a per-vendor workspace under vendors/<tag>/,

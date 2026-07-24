@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Setup local aya checkout for development
 # This creates a .cargo/config.toml at the repo root that patches aya dependencies
 # to use local paths instead of the GitHub fork.

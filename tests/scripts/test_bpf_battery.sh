@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # BPF Battery Driver Tests
 # Tests the HID-BPF battery driver for 2.4GHz dongle
 #

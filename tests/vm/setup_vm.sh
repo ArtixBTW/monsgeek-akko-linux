@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # MonsGeek M1 V5 HE Driver - VM Setup Script
 # Creates a QEMU/KVM VM for testing the driver in Ubuntu 25.10
 #
@@ -176,7 +176,7 @@ EOF
 guest_setup_script() {
     # Generate a script to run inside the guest VM
     cat <<'GUEST_SCRIPT'
-#!/bin/bash
+#!/usr/bin/env bash
 # Guest VM setup script for MonsGeek driver testing
 # Run this inside the Ubuntu 25.10 VM
 

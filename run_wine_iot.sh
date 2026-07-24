@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Helper script to run Wine IOT driver with optional strace
 
 WINEPREFIX=/home/florian/src-misc/monsgeek-m1-v5-tmr/wine_iot

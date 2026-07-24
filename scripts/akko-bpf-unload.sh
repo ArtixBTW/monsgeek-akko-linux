@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Unload Akko dongle HID-BPF program
 # This script should be owned by root with setuid: chown root:root && chmod 4755
 

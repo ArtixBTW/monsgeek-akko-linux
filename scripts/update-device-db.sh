@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Update the MonsGeek/Akko device database.
 #
 # Mines device definitions, key matrices and key layouts from any number of sources and

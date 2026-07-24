@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # MonsGeek M1 V5 HE Keyboard Driver - Test Runner
 # Usage: ./run_tests.sh [category] [test_id]
 #   category: build, install, cli, tui, bpf, transport, all
