@@ -210,20 +210,7 @@ pub fn open_keyboard(
         kb.set_polling_rates(def.polling_rates().to_vec());
     }
 
-    // Resolve key names: prefer builtin profile, fall back to matrix database.
-    let profile = device_id
-        .and_then(|id| registry.find_by_id(id as u32))
-        .or_else(|| registry.find_by_vid_pid(vid, pid));
-    if let Some(p) = profile {
-        let names: Vec<String> = (0..p.matrix_size())
-            .map(|i| p.matrix_key_name(i as u8).to_string())
-            .collect();
-        kb.set_matrix_key_names(names);
-    } else if let Some(matrix) = matrix_db {
-        let size = matrix.matrix_size();
-        let names: Vec<String> = (0..size)
-            .map(|i| matrix.key_name(i).unwrap_or("").to_string())
-            .collect();
+    if let Some(names) = registry.resolve_matrix_key_names(device_id, vid, pid) {
         kb.set_matrix_key_names(names);
     }
 

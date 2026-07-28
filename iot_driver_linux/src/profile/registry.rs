@@ -22,6 +22,13 @@ pub struct ProfileRegistry {
     device_db: Option<DeviceDatabase>,
 }
 
+/// Collect a profile's per-position key names into an owned vector.
+fn profile_key_names(p: &dyn DeviceProfile) -> Vec<String> {
+    (0..p.matrix_size())
+        .map(|i| p.matrix_key_name(i as u8).to_string())
+        .collect()
+}
+
 impl ProfileRegistry {
     /// Create an empty registry
     pub fn new() -> Self {
@@ -155,46 +162,57 @@ impl ProfileRegistry {
         self.by_id.insert(id, profile);
     }
 
-    /// Find profile by VID/PID
-    /// Returns the first matching profile (use find_by_vid_pid_company for disambiguation)
-    pub fn find_by_vid_pid(&self, vid: u16, pid: u16) -> Option<Arc<dyn DeviceProfile>> {
+    /// Find a builtin profile by USB VID/PID (first match).
+    ///
+    /// Private on purpose: VID/PID is **not unique** across products (e.g. the Womier
+    /// SK75 TMR reuses the MonsGeek `0x3151:0x5030`), so a VID/PID match may return an
+    /// unrelated board's profile. It is only ever a last-resort fallback inside
+    /// [`Self::resolve_matrix_key_names`], never a standalone lookup.
+    fn find_by_vid_pid(&self, vid: u16, pid: u16) -> Option<Arc<dyn DeviceProfile>> {
         self.by_vid_pid
             .get(&(vid, pid))
             .and_then(|profiles| profiles.first().cloned())
     }
 
-    /// Find all profiles matching a VID/PID
-    pub fn find_all_by_vid_pid(&self, vid: u16, pid: u16) -> Vec<Arc<dyn DeviceProfile>> {
-        self.by_vid_pid
-            .get(&(vid, pid))
-            .cloned()
-            .unwrap_or_default()
+    /// Find a builtin profile by firmware device ID (the authoritative identifier).
+    /// Private: used only by [`Self::resolve_matrix_key_names`].
+    fn find_by_id(&self, id: u32) -> Option<Arc<dyn DeviceProfile>> {
+        self.by_id.get(&id).cloned()
     }
 
-    /// Find profile by VID/PID with company preference
-    pub fn find_by_vid_pid_company(
+    /// Resolve per-matrix-position key names for a connected device, most
+    /// authoritative source first:
+    ///
+    /// 1. a builtin [`DeviceProfile`] matched by firmware **device id** (hand-curated
+    ///    layouts such as the M1 V5),
+    /// 2. the id-resolved matrix-DB entry from `device_matrices.json` (covers every
+    ///    third-party board), then
+    /// 3. a builtin profile matched only by **VID/PID**, as a last resort when the
+    ///    device id is unavailable.
+    ///
+    /// The VID/PID builtin must never precede the matrix DB: several distinct products
+    /// share a VID/PID, and matching on USB ids alone would stamp one board with
+    /// another's layout (the bug where an SK75 TMR was labelled as an M1 V5). This is
+    /// the only supported way to obtain key names — the raw by-id / by-vid-pid lookups
+    /// are deliberately private so the wrong ordering can't be rebuilt at a call site.
+    pub fn resolve_matrix_key_names(
         &self,
+        device_id: Option<i32>,
         vid: u16,
         pid: u16,
-        preferred_company: &str,
-    ) -> Option<Arc<dyn DeviceProfile>> {
-        let profiles = self.by_vid_pid.get(&(vid, pid))?;
-
-        // Try to find matching company first
-        if let Some(profile) = profiles
-            .iter()
-            .find(|p| p.company().eq_ignore_ascii_case(preferred_company))
-        {
-            return Some(profile.clone());
+    ) -> Option<Vec<String>> {
+        if let Some(p) = device_id.and_then(|id| self.find_by_id(id as u32)) {
+            return Some(profile_key_names(p.as_ref()));
         }
-
-        // Fall back to first match
-        profiles.first().cloned()
-    }
-
-    /// Find profile by device ID
-    pub fn find_by_id(&self, id: u32) -> Option<Arc<dyn DeviceProfile>> {
-        self.by_id.get(&id).cloned()
+        if let Some(m) = device_id.and_then(|id| self.get_device_matrix(vid, pid, id)) {
+            return Some(
+                (0..m.matrix_size())
+                    .map(|i| m.key_name(i).unwrap_or("").to_string())
+                    .collect(),
+            );
+        }
+        self.find_by_vid_pid(vid, pid)
+            .map(|p| profile_key_names(p.as_ref()))
     }
 
     /// Check if a VID/PID is registered
@@ -310,6 +328,28 @@ mod tests {
         assert_eq!(profile.pid(), 0x5030);
     }
 
+    /// The Womier SK75 TMR (device id 3804) shares USB `0x3151:0x5030` with the
+    /// MonsGeek M1 V5 HE. Key-name resolution must key off the device id (matrix DB),
+    /// not the shared VID/PID (M1 V5 builtin) — otherwise the SK75 gets stamped with
+    /// the M1 V5 layout (empty position 84, Home at 85). Needs `data/*.json`.
+    #[test]
+    fn test_resolve_key_names_prefers_id_over_shared_vid_pid() {
+        let registry = ProfileRegistry::with_builtins();
+
+        // M1 V5 resolves via its own builtin (matched by id): position 84 is a gap.
+        let m1v5 = registry
+            .resolve_matrix_key_names(Some(2949), 0x3151, 0x5030)
+            .expect("M1 V5 key names");
+        assert_eq!(m1v5[84], "");
+
+        // SK75 shares the VID/PID but must resolve to its own matrix-DB layout.
+        let sk75 = registry
+            .resolve_matrix_key_names(Some(3804), 0x3151, 0x5030)
+            .expect("SK75 key names (needs data/device_matrices.json)");
+        assert_eq!(sk75[84], "Home");
+        assert_eq!(sk75[85], "End");
+    }
+
     #[test]
     fn test_all_vid_pids() {
         let registry = ProfileRegistry::with_builtins();
@@ -317,17 +357,6 @@ mod tests {
         let vid_pids = registry.all_vid_pids();
         assert!(vid_pids.contains(&(0x3151, 0x5030)));
         assert!(vid_pids.contains(&(0x3151, 0x503A)));
-    }
-
-    #[test]
-    fn test_company_preference() {
-        let registry = ProfileRegistry::with_builtins();
-
-        // Should find MonsGeek profile
-        let profile = registry
-            .find_by_vid_pid_company(0x3151, 0x5030, "MonsGeek")
-            .unwrap();
-        assert_eq!(profile.company(), "MonsGeek");
     }
 
     #[test]
