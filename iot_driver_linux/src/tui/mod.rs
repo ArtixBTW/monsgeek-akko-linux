@@ -1372,28 +1372,19 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                     }
                                 }
                                 Some(PickerConfirm::Output) => {
-                                    // `Some(inner)` = a choice was made; `inner` is
-                                    // `None` for the "(none)" option, `Some(pos)` for a key.
+                                    // The picker carries the chosen KeyAction directly
+                                    // (a HID key, a consumer/media control, or Disabled
+                                    // for "(none)" on an overlay layer).
                                     let picked = app
                                         .trigger_edit_modal
                                         .as_mut()
                                         .and_then(|m| m.output_picker.take())
                                         .and_then(|p| p.selected().copied());
-                                    if let Some(inner) = picked {
-                                        let (action, key) = match inner {
-                                            Some(pos) => (
-                                                crate::key_action::KeyAction::Key(
-                                                    app.key_output_hid(pos),
-                                                ),
-                                                Some(pos),
-                                            ),
-                                            None => (crate::key_action::KeyAction::Disabled, None),
-                                        };
-                                        if let Some(m) = app.trigger_edit_modal.as_mut() {
-                                            let layer = m.output_layer;
-                                            m.outputs[layer] = action;
-                                            m.output_keys[layer] = key;
-                                        }
+                                    if let (Some(action), Some(m)) =
+                                        (picked, app.trigger_edit_modal.as_mut())
+                                    {
+                                        let layer = m.output_layer;
+                                        m.outputs[layer] = action;
                                     }
                                 }
                                 Some(PickerConfirm::DksKey) => {
@@ -1439,9 +1430,13 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                     _ => {}
                                 }
                             } else if let Some(p) = modal.output_picker.as_mut() {
+                                // Long list — type to filter. Only arrows navigate
+                                // here (j/k/letters are filter input, not motion).
                                 match key.code {
-                                    _ if up => p.up(),
-                                    _ if down => p.down(),
+                                    KeyCode::Up => p.up(),
+                                    KeyCode::Down => p.down(),
+                                    KeyCode::Backspace => p.pop_filter(),
+                                    KeyCode::Char(c) => p.push_filter(c),
                                     KeyCode::Esc => modal.output_picker = None,
                                     _ => {}
                                 }

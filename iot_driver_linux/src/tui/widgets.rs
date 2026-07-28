@@ -17,6 +17,11 @@ use ratatui::{
 pub(crate) struct PopupSelect<T> {
     title: String,
     items: Vec<(String, T)>,
+    /// Indices into `items` matching the current `filter` (all of them when empty).
+    /// Navigation and selection operate over this view.
+    filtered: Vec<usize>,
+    /// Case-insensitive substring typed by the user to narrow a long list.
+    filter: String,
     state: ListState,
 }
 
@@ -24,6 +29,7 @@ impl<T> PopupSelect<T> {
     /// Build a selector from `(label, value)` rows. The first row is
     /// preselected.
     pub(crate) fn new(title: impl Into<String>, items: Vec<(String, T)>) -> Self {
+        let filtered = (0..items.len()).collect();
         let mut state = ListState::default();
         if !items.is_empty() {
             state.select(Some(0));
@@ -31,65 +37,109 @@ impl<T> PopupSelect<T> {
         Self {
             title: title.into(),
             items,
+            filtered,
+            filter: String::new(),
             state,
         }
     }
 
+    /// Recompute the filtered view and clamp the selection into it.
+    fn refilter(&mut self) {
+        let needle = self.filter.to_ascii_lowercase();
+        self.filtered = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, (label, _))| {
+                needle.is_empty() || label.to_ascii_lowercase().contains(&needle)
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if self.filtered.is_empty() {
+            self.state.select(None);
+        } else {
+            let cur = self
+                .state
+                .selected()
+                .unwrap_or(0)
+                .min(self.filtered.len() - 1);
+            self.state.select(Some(cur));
+        }
+    }
+
+    /// Append a character to the filter and re-narrow the list.
+    pub(crate) fn push_filter(&mut self, c: char) {
+        self.filter.push(c);
+        self.refilter();
+    }
+
+    /// Drop the last filter character and re-widen the list.
+    pub(crate) fn pop_filter(&mut self) {
+        self.filter.pop();
+        self.refilter();
+    }
+
     /// Move the selection up one row (saturating at the top).
     pub(crate) fn up(&mut self) {
+        if self.filtered.is_empty() {
+            return;
+        }
         let i = self.state.selected().unwrap_or(0);
         self.state.select(Some(i.saturating_sub(1)));
     }
 
     /// Move the selection down one row (saturating at the bottom).
     pub(crate) fn down(&mut self) {
-        if self.items.is_empty() {
+        if self.filtered.is_empty() {
             return;
         }
         let i = self.state.selected().unwrap_or(0);
-        self.state.select(Some((i + 1).min(self.items.len() - 1)));
+        self.state
+            .select(Some((i + 1).min(self.filtered.len() - 1)));
     }
 
     /// The value of the currently highlighted row, if any.
     pub(crate) fn selected(&self) -> Option<&T> {
-        self.items.get(self.state.selected()?).map(|(_, v)| v)
+        let &idx = self.filtered.get(self.state.selected()?)?;
+        self.items.get(idx).map(|(_, v)| v)
     }
 
-    /// Preselect the first row whose value satisfies `pred` (no-op if none
-    /// match), so the popup opens on the current value.
+    /// Preselect the first (visible) row whose value satisfies `pred` (no-op if
+    /// none match), so the popup opens on the current value.
     pub(crate) fn select_where(&mut self, pred: impl Fn(&T) -> bool) {
-        if let Some(i) = self.items.iter().position(|(_, v)| pred(v)) {
-            self.state.select(Some(i));
+        if let Some(pos) = self.filtered.iter().position(|&i| pred(&self.items[i].1)) {
+            self.state.select(Some(pos));
         }
     }
 
     /// Render centered over `area`, sized to content and clamped to `area`.
     pub(crate) fn render(&mut self, f: &mut Frame, area: Rect) {
+        let title = if self.filter.is_empty() {
+            self.title.clone()
+        } else {
+            format!("{} /{}", self.title, self.filter)
+        };
         let content_w = self
-            .items
+            .filtered
             .iter()
-            .map(|(l, _)| l.len())
+            .map(|&i| self.items[i].0.len())
             .max()
             .unwrap_or(0)
-            .max(self.title.len()) as u16;
+            .max(title.len()) as u16;
         // +2 borders, +2 for the "> " highlight symbol.
         let width = (content_w + 4).min(area.width);
-        let height = (self.items.len() as u16 + 2).min(area.height);
+        let height = (self.filtered.len() as u16 + 2).min(area.height);
         let x = area.x + area.width.saturating_sub(width) / 2;
         let y = area.y + area.height.saturating_sub(height) / 2;
         let popup = Rect::new(x, y, width, height);
 
         let items: Vec<ListItem> = self
-            .items
+            .filtered
             .iter()
-            .map(|(label, _)| ListItem::new(label.as_str()))
+            .map(|&i| ListItem::new(self.items[i].0.as_str()))
             .collect();
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(self.title.clone()),
-            )
+            .block(Block::default().borders(Borders::ALL).title(title))
             .highlight_style(
                 Style::default()
                     .bg(Color::Blue)
@@ -137,5 +187,32 @@ mod tests {
     fn empty_selector_has_no_selection() {
         let p: PopupSelect<u8> = PopupSelect::new("t", vec![]);
         assert_eq!(p.selected(), None);
+    }
+
+    #[test]
+    fn filter_narrows_navigates_and_clears() {
+        let mut p = PopupSelect::new(
+            "t",
+            vec![
+                ("Alpha".into(), 1),
+                ("Beta".into(), 2),
+                ("Gamma".into(), 3),
+                ("Bravo".into(), 4),
+            ],
+        );
+        // Case-insensitive substring; navigation stays inside the filtered view.
+        p.push_filter('b');
+        assert_eq!(p.selected(), Some(&2)); // "Beta"
+        p.down();
+        assert_eq!(p.selected(), Some(&4)); // "Bravo"
+        p.down();
+        assert_eq!(p.selected(), Some(&4)); // saturates within the filtered rows
+                                            // No match → nothing selectable.
+        p.push_filter('z');
+        assert_eq!(p.selected(), None);
+        // Backspacing restores the wider list.
+        p.pop_filter();
+        p.pop_filter();
+        assert_eq!(p.selected(), Some(&1)); // "Alpha", filter empty again
     }
 }

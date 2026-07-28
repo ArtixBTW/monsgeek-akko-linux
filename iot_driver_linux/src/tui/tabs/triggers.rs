@@ -18,6 +18,7 @@ use monsgeek_keyboard::{
 use super::super::shared::{AsyncResult, LoadState, SpinnerConfig};
 use super::super::App;
 use super::depth::get_key_label;
+use super::remaps::{all_hid_keys, CONSUMER_KEYS};
 
 // ============================================================================
 // Types
@@ -262,8 +263,6 @@ pub(in crate::tui) struct PerKeyEditPrefetch {
     pub dks: DksEditState,
     /// Current output per layer `[Base, Layer1, Fn]`.
     pub outputs: [KeyAction; 3],
-    /// Matrix position whose default keycode equals each layer's output (picker preselect).
-    pub output_keys: [Option<u8>; 3],
 }
 
 /// Trigger edit modal state
@@ -310,14 +309,12 @@ pub(in crate::tui) struct TriggerEditModal {
     pub dks_action_picker: Option<(usize, PopupSelect<DksAction>)>,
     /// The key's emitted output per layer `[Base, Layer1, Fn]` (non-DKS modes).
     pub outputs: [KeyAction; 3],
-    /// Matrix position whose default keycode was chosen per layer (for the picker).
-    pub output_keys: [Option<u8>; 3],
     /// Snapshot of `outputs` at open, so save only writes layers that changed.
     pub outputs_orig: [KeyAction; 3],
     /// Which output layer the `Output`/`Layer` fields target: 0=Base, 1=Layer1, 2=Fn.
     pub output_layer: usize,
-    /// Open output-key picker.
-    pub output_picker: Option<PopupSelect<Option<u8>>>,
+    /// Open output picker: any HID key or consumer/media control.
+    pub output_picker: Option<PopupSelect<KeyAction>>,
 }
 
 fn format_dks_combo(combo: DksCombo) -> String {
@@ -357,7 +354,6 @@ impl TriggerEditModal {
             dks_key_picker: None,
             dks_action_picker: None,
             outputs: [KeyAction::Disabled; 3],
-            output_keys: [None; 3],
             outputs_orig: [KeyAction::Disabled; 3],
             output_layer: 0,
             output_picker: None,
@@ -403,7 +399,6 @@ impl TriggerEditModal {
             dks_key_picker: None,
             dks_action_picker: None,
             outputs: prefetch.outputs,
-            output_keys: prefetch.output_keys,
             outputs_orig: prefetch.outputs,
             output_layer: 0,
             output_picker: None,
@@ -620,18 +615,30 @@ impl TriggerEditModal {
         };
     }
 
-    /// Open the output-key picker for the current output layer. "(none)" is offered
-    /// on the overlay layers (Layer1 / Fn) — they're transparent when empty — but
-    /// never on Base, where an empty entry would silence the key.
+    /// Open the output picker for the current output layer. Offers every HID key
+    /// plus the consumer/media controls — not just keys physically present on the
+    /// board — so media, PrintScreen, F13-F24 etc. are all bindable. "(none)" is
+    /// offered on the overlay layers (Layer1 / Fn), which are transparent when
+    /// empty, but never on Base, where an empty entry would silence the key. Type
+    /// to filter the list.
     pub(in crate::tui) fn open_output_picker(&mut self) {
-        let mut items: Vec<(String, Option<u8>)> = Vec::new();
+        let mut items: Vec<(String, KeyAction)> = Vec::new();
         if self.output_layer != 0 {
-            items.push(("(none)".to_string(), None));
+            items.push(("(none)".to_string(), KeyAction::Disabled));
         }
-        items.extend(self.key_choices.iter().map(|(l, i)| (l.clone(), Some(*i))));
+        items.extend(
+            all_hid_keys()
+                .into_iter()
+                .map(|(code, name)| (name.to_string(), KeyAction::Key(code))),
+        );
+        items.extend(
+            CONSUMER_KEYS
+                .iter()
+                .map(|&(code, name)| (format!("{name} (media)"), KeyAction::Consumer(code))),
+        );
         let mut picker = PopupSelect::new(format!("{} output", self.output_layer_name()), items);
-        let current = self.output_keys[self.output_layer];
-        picker.select_where(|&p| p == current);
+        let current = self.outputs[self.output_layer];
+        picker.select_where(|&a| a == current);
         self.output_picker = Some(picker);
     }
 
@@ -842,19 +849,6 @@ impl App {
         };
         // Current output per layer [Base, Layer1, Fn]. Base/Layer1 come from
         // keymatrix layers 0/1; Fn from the separate Fn table.
-        let resolve = |bytes: [u8; 4]| {
-            let action = KeyAction::from_config_bytes(bytes);
-            let hid = match action {
-                KeyAction::Key(c) => c,
-                KeyAction::Combo { key, .. } => key,
-                _ => 0,
-            };
-            let key = key_choices
-                .iter()
-                .map(|(_, i)| *i)
-                .find(|&idx| self.key_output_hid(idx) == hid);
-            (action, key)
-        };
         let kb = self.keyboard.as_ref();
         let base_bytes = kb
             .and_then(|kb| kb.get_key_config_at_layer(0, 0, key_index as u8).ok())
@@ -869,11 +863,11 @@ impl App {
                     .map(|s| [s[0], s[1], s[2], s[3]])
             })
             .unwrap_or([0; 4]);
-        let (o0, k0) = resolve(base_bytes);
-        let (o1, k1) = resolve(l1_bytes);
-        let (o2, k2) = resolve(fn_bytes);
-        let outputs = [o0, o1, o2];
-        let output_keys = [k0, k1, k2];
+        let outputs = [
+            KeyAction::from_config_bytes(base_bytes),
+            KeyAction::from_config_bytes(l1_bytes),
+            KeyAction::from_config_bytes(fn_bytes),
+        ];
         if let Some(ref triggers) = self.triggers {
             let modal = TriggerEditModal::new_per_key(
                 key_index,
@@ -884,7 +878,6 @@ impl App {
                     snaptap_partner,
                     key_choices,
                     outputs,
-                    output_keys,
                     dks,
                 },
             );
