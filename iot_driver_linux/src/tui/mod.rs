@@ -15,7 +15,7 @@ use tabs::depth::{get_key_label, render_depth_monitor};
 use tabs::device_info::{render_device_info, HexColorTarget, InfoTag};
 
 use tabs::key_mapping::{KeyMappingFilter, KeyMappingView, KmSort};
-use tabs::triggers::{render_trigger_edit_modal, TriggerEditModal};
+use tabs::triggers::{render_trigger_edit_modal, TriggerEditModal, TriggerField};
 
 #[cfg(feature = "notify")]
 use crate::effect::{default_effects_path, EffectLibrary};
@@ -1067,7 +1067,6 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                             m.mode_picker.is_some()
                                 || m.key_picker.is_some()
                                 || m.output_picker.is_some()
-                                || m.dks_key_picker.is_some()
                                 || m.dks_action_picker.is_some()
                         });
                     if picker_open {
@@ -1077,7 +1076,6 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                 Mode,
                                 Key,
                                 Output,
-                                DksKey,
                                 DksAction,
                             }
                             let confirm = app.trigger_edit_modal.as_ref().and_then(|m| {
@@ -1087,8 +1085,6 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                     Some(PickerConfirm::Key)
                                 } else if m.output_picker.is_some() {
                                     Some(PickerConfirm::Output)
-                                } else if m.dks_key_picker.is_some() {
-                                    Some(PickerConfirm::DksKey)
                                 } else if m.dks_action_picker.is_some() {
                                     Some(PickerConfirm::DksAction)
                                 } else {
@@ -1109,7 +1105,9 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                 Some(PickerConfirm::Output) => {
                                     // The picker carries the chosen KeyAction directly
                                     // (a HID key, a consumer/media control, or Disabled
-                                    // for "(none)" on an overlay layer).
+                                    // for "(none)"). Which entry it lands in depends on
+                                    // the field that opened it — both are keymatrix
+                                    // entries, so one picker serves both.
                                     let picked = app
                                         .trigger_edit_modal
                                         .as_mut()
@@ -1118,27 +1116,12 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                     if let (Some(action), Some(m)) =
                                         (picked, app.trigger_edit_modal.as_mut())
                                     {
-                                        let layer = m.output_layer;
-                                        m.outputs[layer] = action;
-                                    }
-                                }
-                                Some(PickerConfirm::DksKey) => {
-                                    let (slot_idx, selected) = {
-                                        let m = app.trigger_edit_modal.as_mut().unwrap();
-                                        let picker = m.dks_key_picker.take().unwrap();
-                                        let sel = picker.selected().copied().flatten();
-                                        (m.dks_binding_index, sel)
-                                    };
-                                    let config = match selected {
-                                        Some(ki) => crate::key_action::KeyAction::Key(
-                                            app.key_output_hid(ki),
-                                        )
-                                        .to_config_bytes(),
-                                        None => [0; 4],
-                                    };
-                                    if let Some(m) = app.trigger_edit_modal.as_mut() {
-                                        m.dks_binding_keys[slot_idx] = selected;
-                                        m.dks_bindings[slot_idx].config = config;
+                                        if m.current_field() == TriggerField::DksBindingKey {
+                                            let slot = m.dks_binding_index;
+                                            m.slots[slot] = action;
+                                        } else {
+                                            m.set_output_action(action);
+                                        }
                                     }
                                 }
                                 Some(PickerConfirm::DksAction) => {
@@ -1176,13 +1159,6 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                     KeyCode::Backspace => p.pop_filter(),
                                     KeyCode::Char(c) => p.push_filter(c),
                                     KeyCode::Esc => modal.output_picker = None,
-                                    _ => {}
-                                }
-                            } else if let Some(p) = modal.dks_key_picker.as_mut() {
-                                match key.code {
-                                    _ if up => p.up(),
-                                    _ if down => p.down(),
-                                    KeyCode::Esc => modal.dks_key_picker = None,
                                     _ => {}
                                 }
                             } else if let Some((_, p)) = modal.dks_action_picker.as_mut() {

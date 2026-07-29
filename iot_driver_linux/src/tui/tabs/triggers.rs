@@ -6,7 +6,6 @@ use ratatui::{prelude::*, widgets::*};
 use std::collections::VecDeque;
 
 use crate::key_action::KeyAction;
-use crate::protocol::hid;
 use crate::tui::widgets::PopupSelect;
 use crate::TriggerSettings;
 use monsgeek_keyboard::{
@@ -245,12 +244,16 @@ impl TriggerField {
     }
 }
 
+/// Fallback DKS trigger point when the device read fails.
+const DEFAULT_DKS_TRAVEL_MM: f32 = 0.7;
+
 /// DKS fields loaded when opening a per-key trigger edit modal.
 #[derive(Debug, Clone)]
 pub(in crate::tui) struct DksEditState {
     pub travel_mm: f32,
-    pub bindings: [DksBinding; 4],
-    pub binding_keys: [Option<u8>; 4],
+    /// Phase roles per output slot; the slot outputs themselves live in
+    /// [`PerKeyEditPrefetch::slots`], since they *are* the keymatrix layers.
+    pub phases: [[DksAction; 4]; 4],
 }
 
 /// Per-key sub-configs fetched from the device before opening the edit modal.
@@ -260,8 +263,12 @@ pub(in crate::tui) struct PerKeyEditPrefetch {
     pub snaptap_partner: Option<u8>,
     pub key_choices: Vec<(String, u8)>,
     pub dks: DksEditState,
-    /// Current output per layer `[Base, Layer1, Fn]`.
-    pub outputs: [KeyAction; 3],
+    /// Keymatrix layers 0–3. In normal modes layers 0/1 are the key's Base and
+    /// Layer1 outputs; in DKS mode the firmware reinterprets all four as the key's
+    /// output slots. One array either way — the mode only changes presentation.
+    pub slots: [KeyAction; 4],
+    /// The key's Fn-layer entry, which lives in a separate store (SET_FN).
+    pub fn_action: KeyAction,
 }
 
 /// Trigger edit modal state
@@ -296,33 +303,24 @@ pub(in crate::tui) struct TriggerEditModal {
     pub key_picker: Option<PopupSelect<Option<u8>>>,
     /// DKS trigger-point travel in mm (per-key only; R1/R4 shallow depth)
     pub dks_travel_mm: f32,
-    /// Four DKS output bindings (per-key only)
-    pub dks_bindings: [DksBinding; 4],
-    /// Which DKS binding row (0–3) is being edited
+    /// Phase roles per DKS output slot (per-key only)
+    pub dks_phases: [[DksAction; 4]; 4],
+    /// Which DKS slot (0–3) the DKS fields edit
     pub dks_binding_index: usize,
-    /// Matrix key index bound to each binding's primary output (for the picker UI)
-    pub dks_binding_keys: [Option<u8>; 4],
-    /// Open DKS output-key picker for the current binding
-    pub dks_key_picker: Option<PopupSelect<Option<u8>>>,
     /// Open DKS action picker: `(DksPhase index, picker)`
     pub dks_action_picker: Option<(usize, PopupSelect<DksAction>)>,
-    /// The key's emitted output per layer `[Base, Layer1, Fn]` (non-DKS modes).
-    pub outputs: [KeyAction; 3],
-    /// Snapshot of `outputs` at open, so save only writes layers that changed.
-    pub outputs_orig: [KeyAction; 3],
-    /// Which output layer the `Output`/`Layer` fields target: 0=Base, 1=Layer1, 2=Fn.
+    /// Keymatrix layers 0–3 (see [`PerKeyEditPrefetch::slots`]).
+    pub slots: [KeyAction; 4],
+    /// The key's Fn-layer entry.
+    pub fn_action: KeyAction,
+    /// Snapshots at open, so save only writes what changed.
+    pub slots_orig: [KeyAction; 4],
+    pub fn_action_orig: KeyAction,
+    /// Which output the `Output`/`Layer` fields target: 0=Base, 1=Layer1, 2=Fn.
     pub output_layer: usize,
-    /// Open output picker: any HID key or consumer/media control.
+    /// Open output picker: any HID key or consumer/media control. Shared by the
+    /// per-layer output field and the DKS slot field — both edit a keymatrix entry.
     pub output_picker: Option<PopupSelect<KeyAction>>,
-}
-
-/// Human label for one DKS output slot.
-fn slot_label(binding: DksBinding) -> String {
-    if binding.is_empty() {
-        "(none)".to_string()
-    } else {
-        KeyAction::from_config_bytes(binding.config).to_string()
-    }
 }
 
 impl TriggerEditModal {
@@ -347,13 +345,13 @@ impl TriggerEditModal {
             mode_picker: None,
             key_picker: None,
             dks_travel_mm: 0.0,
-            dks_bindings: [DksBinding::default(); 4],
+            dks_phases: [[DksAction::default(); 4]; 4],
             dks_binding_index: 0,
-            dks_binding_keys: [None; 4],
-            dks_key_picker: None,
             dks_action_picker: None,
-            outputs: [KeyAction::Disabled; 3],
-            outputs_orig: [KeyAction::Disabled; 3],
+            slots: [KeyAction::Disabled; 4],
+            fn_action: KeyAction::Disabled,
+            slots_orig: [KeyAction::Disabled; 4],
+            fn_action_orig: KeyAction::Disabled,
             output_layer: 0,
             output_picker: None,
         }
@@ -392,13 +390,13 @@ impl TriggerEditModal {
             mode_picker: None,
             key_picker: None,
             dks_travel_mm: prefetch.dks.travel_mm,
-            dks_bindings: prefetch.dks.bindings,
+            dks_phases: prefetch.dks.phases,
             dks_binding_index: 0,
-            dks_binding_keys: prefetch.dks.binding_keys,
-            dks_key_picker: None,
             dks_action_picker: None,
-            outputs: prefetch.outputs,
-            outputs_orig: prefetch.outputs,
+            slots: prefetch.slots,
+            fn_action: prefetch.fn_action,
+            slots_orig: prefetch.slots,
+            fn_action_orig: prefetch.fn_action,
             output_layer: 0,
             output_picker: None,
         }
@@ -503,7 +501,7 @@ impl TriggerEditModal {
             TriggerField::OutputLayer => self.cycle_output_layer(true),
             TriggerField::Output => self.open_output_picker(),
             TriggerField::SnapTapPartner => self.open_key_picker(),
-            TriggerField::DksBindingKey => self.open_dks_key_picker(),
+            TriggerField::DksBindingKey => self.open_dks_slot_picker(),
             TriggerField::DksBinding => self.cycle_dks_binding(true),
             field if field.dks_action_index().is_some() => {
                 self.open_dks_action_picker(field.dks_action_index().unwrap());
@@ -526,7 +524,7 @@ impl TriggerEditModal {
             TriggerField::OutputLayer => self.cycle_output_layer(false),
             TriggerField::Output => self.open_output_picker(),
             TriggerField::SnapTapPartner => self.open_key_picker(),
-            TriggerField::DksBindingKey => self.open_dks_key_picker(),
+            TriggerField::DksBindingKey => self.open_dks_slot_picker(),
             TriggerField::DksBinding => self.cycle_dks_binding(false),
             field if field.dks_action_index().is_some() => {
                 self.open_dks_action_picker(field.dks_action_index().unwrap());
@@ -600,6 +598,22 @@ impl TriggerEditModal {
         }
     }
 
+    /// The action the `Output` field currently targets: keymatrix layer 0/1, or the
+    /// separate Fn entry.
+    pub(in crate::tui) fn output_action(&self) -> KeyAction {
+        match self.output_layer {
+            l if l as u8 == FN_WIRE_LAYER => self.fn_action,
+            l => self.slots[l],
+        }
+    }
+
+    pub(in crate::tui) fn set_output_action(&mut self, action: KeyAction) {
+        match self.output_layer {
+            l if l as u8 == FN_WIRE_LAYER => self.fn_action = action,
+            l => self.slots[l] = action,
+        }
+    }
+
     /// Names of the three output layers, indexed by `output_layer`.
     pub(in crate::tui) fn output_layer_name(&self) -> &'static str {
         ["Base", "Layer1", "Fn"][self.output_layer.min(2)]
@@ -621,8 +635,22 @@ impl TriggerEditModal {
     /// empty, but never on Base, where an empty entry would silence the key. Type
     /// to filter the list.
     pub(in crate::tui) fn open_output_picker(&mut self) {
+        let (title, current) = (self.output_layer_name().to_string(), self.output_action());
+        // Base (keymatrix layer 0) has no ROM fallback, so "(none)" would silence the
+        // key; the overlay layers treat an empty entry as transparent.
+        self.open_action_picker(title, current, self.output_layer != 0);
+    }
+
+    /// Open the same picker for the selected DKS output slot.
+    pub(in crate::tui) fn open_dks_slot_picker(&mut self) {
+        let slot = self.dks_binding_index;
+        let title = format!("DKS slot {}", slot + 1);
+        self.open_action_picker(title, self.slots[slot], slot != 0);
+    }
+
+    fn open_action_picker(&mut self, title: String, current: KeyAction, allow_none: bool) {
         let mut items: Vec<(String, KeyAction)> = Vec::new();
-        if self.output_layer != 0 {
+        if allow_none {
             items.push(("(none)".to_string(), KeyAction::Disabled));
         }
         items.extend(
@@ -635,28 +663,13 @@ impl TriggerEditModal {
                 .iter()
                 .map(|&(code, name)| (format!("{name} (media)"), KeyAction::Consumer(code))),
         );
-        let mut picker = PopupSelect::new(format!("{} output", self.output_layer_name()), items);
-        let current = self.outputs[self.output_layer];
+        let mut picker = PopupSelect::new(format!("{title} output"), items);
         picker.select_where(|&a| a == current);
         self.output_picker = Some(picker);
     }
 
-    /// Open the DKS output-key picker for the current slot.
-    pub(in crate::tui) fn open_dks_key_picker(&mut self) {
-        let mut items = vec![("(none)".to_string(), None)];
-        items.extend(self.key_choices.iter().map(|(l, i)| (l.clone(), Some(*i))));
-        let mut picker = PopupSelect::new(
-            format!("DKS binding {} output", self.dks_binding_index + 1),
-            items,
-        );
-        let current = self.dks_binding_keys[self.dks_binding_index];
-        picker.select_where(|&p| p == current);
-        self.dks_key_picker = Some(picker);
-    }
-
-    /// Open the DKS action picker for one travel checkpoint on the current slot.
     pub(in crate::tui) fn open_dks_action_picker(&mut self, action_idx: usize) {
-        let current = self.dks_bindings[self.dks_binding_index].phase_actions[action_idx];
+        let current = self.dks_phases[self.dks_binding_index][action_idx];
         let items: Vec<(String, DksAction)> = [
             DksAction::None,
             DksAction::SingleTrigger,
@@ -683,7 +696,7 @@ impl TriggerEditModal {
     pub(in crate::tui) fn confirm_dks_action_picker(&mut self) {
         if let Some((idx, picker)) = self.dks_action_picker.take() {
             if let Some(&action) = picker.selected() {
-                self.dks_bindings[self.dks_binding_index].phase_actions[idx] = action;
+                self.dks_phases[self.dks_binding_index][idx] = action;
             }
         }
     }
@@ -763,33 +776,6 @@ impl App {
             .collect()
     }
 
-    /// Base-layer HID code a matrix key currently emits, falling back to the
-    /// factory keycode for its position when the key has no plain-key output.
-    pub(in crate::tui) fn key_output_hid(&self, key_index: u8) -> u8 {
-        let current = self
-            .key_rows
-            .iter()
-            .find(|r| r.index == key_index)
-            .map(|r| r.outputs[0]);
-        current.and_then(|a| a.primary_usage()).unwrap_or_else(|| {
-            hid::key_code_from_name(monsgeek_transport::protocol::matrix::key_name(key_index))
-                .unwrap_or(0)
-        })
-    }
-
-    /// Best-effort reverse lookup: which matrix key emits this slot's primary usage.
-    fn dks_binding_key_for_slot(
-        &self,
-        config: [u8; 4],
-        key_choices: &[(String, u8)],
-    ) -> Option<u8> {
-        let hid_code = KeyAction::from_config_bytes(config).primary_usage()?;
-        key_choices
-            .iter()
-            .map(|(_, i)| *i)
-            .find(|&idx| self.key_output_hid(idx) == hid_code)
-    }
-
     /// Open trigger edit modal for a specific key
     pub(in crate::tui) fn open_trigger_edit_key(&mut self, key_index: usize) {
         if self.triggers.is_none() {
@@ -816,53 +802,42 @@ impl App {
         };
         let key_choices = self.key_choices();
         let factor = self.precision.factor() as f32;
-        let dks = match self.keyboard.as_ref() {
-            Some(kb) => kb
-                .get_dks_config(key_index as u8)
-                .map(|cfg| {
-                    let mut binding_keys = [None; 4];
-                    for (i, binding) in cfg.bindings.iter().enumerate() {
-                        binding_keys[i] =
-                            self.dks_binding_key_for_slot(binding.config, &key_choices);
-                    }
-                    DksEditState {
-                        travel_mm: cfg.trigger_point_travel_raw as f32 / factor,
-                        bindings: cfg.bindings,
-                        binding_keys,
-                    }
-                })
-                .unwrap_or(DksEditState {
-                    travel_mm: 0.7,
-                    bindings: [DksBinding::default(); 4],
-                    binding_keys: [None; 4],
-                }),
-            None => DksEditState {
-                travel_mm: 0.7,
-                bindings: [DksBinding::default(); 4],
-                binding_keys: [None; 4],
-            },
-        };
-        // Current output per layer [Base, Layer1, Fn]. Base/Layer1 come from
-        // keymatrix layers 0/1; Fn from the separate Fn table.
         let kb = self.keyboard.as_ref();
-        let base_bytes = kb
-            .and_then(|kb| kb.get_key_config_at_layer(0, 0, key_index as u8).ok())
-            .unwrap_or([0; 4]);
-        let l1_bytes = kb
-            .and_then(|kb| kb.get_key_config_at_layer(0, 1, key_index as u8).ok())
-            .unwrap_or([0; 4]);
-        let fn_bytes = kb
+
+        // Keymatrix layers 0–3 and the DKS travel/phase data come from one read:
+        // the DKS "bindings" *are* those layers, so reading them separately would
+        // fetch the same bytes twice and risk the two copies disagreeing.
+        let dks_cfg = kb.and_then(|kb| kb.get_dks_config(key_index as u8).ok());
+        let slots: [KeyAction; 4] = match &dks_cfg {
+            Some(cfg) => {
+                std::array::from_fn(|i| KeyAction::from_config_bytes(cfg.bindings[i].config))
+            }
+            None => std::array::from_fn(|i| {
+                kb.and_then(|kb| kb.get_key_config_at_layer(0, i as u8, key_index as u8).ok())
+                    .map(KeyAction::from_config_bytes)
+                    .unwrap_or(KeyAction::Disabled)
+            }),
+        };
+        let dks = DksEditState {
+            travel_mm: dks_cfg
+                .as_ref()
+                .map(|c| c.trigger_point_travel_raw as f32 / factor)
+                .unwrap_or(DEFAULT_DKS_TRAVEL_MM),
+            phases: dks_cfg
+                .as_ref()
+                .map(|c| std::array::from_fn(|i| c.bindings[i].phase_actions))
+                .unwrap_or_default(),
+        };
+
+        // The Fn layer is a separate store, so it is always its own read.
+        let fn_action = kb
             .and_then(|kb| kb.get_fn_keymatrix(0, 0, 8).ok())
             .and_then(|m| {
                 m.get(key_index * 4..key_index * 4 + 4)
-                    .map(|s| [s[0], s[1], s[2], s[3]])
+                    .map(|s| KeyAction::from_config_bytes([s[0], s[1], s[2], s[3]]))
             })
-            .unwrap_or([0; 4]);
-        let outputs = [
-            KeyAction::from_config_bytes(base_bytes),
-            KeyAction::from_config_bytes(l1_bytes),
-            KeyAction::from_config_bytes(fn_bytes),
-        ];
+            .unwrap_or(KeyAction::Disabled);
+
         if let Some(ref triggers) = self.triggers {
             let modal = TriggerEditModal::new_per_key(
                 key_index,
@@ -872,7 +847,8 @@ impl App {
                     modtap_ms,
                     snaptap_partner,
                     key_choices,
-                    outputs,
+                    slots,
+                    fn_action,
                     dks,
                 },
             );
@@ -993,10 +969,17 @@ impl App {
                             }
                         }
                         if mode_byte.base == KeyMode::DynamicKeystroke {
-                            let travel_raw = (modal.dks_travel_mm * factor) as u16;
+                            // DKS owns all four keymatrix layers, so it writes them
+                            // as one batch alongside the travel and phase data.
+                            let bindings = std::array::from_fn(|i| {
+                                DksBinding::from_packed_mode(
+                                    DksBinding::pack_phase_actions(modal.dks_phases[i]),
+                                    modal.slots[i].to_config_bytes(),
+                                )
+                            });
                             let config = DksConfig {
-                                trigger_point_travel_raw: travel_raw,
-                                bindings: modal.dks_bindings,
+                                trigger_point_travel_raw: (modal.dks_travel_mm * factor) as u16,
+                                bindings,
                             };
                             if let Err(e) =
                                 keyboard.set_dks_config(key, &config, Some(mode_byte.rapid_trigger))
@@ -1004,15 +987,23 @@ impl App {
                                 extra.push(format!("dks: {e}"));
                             }
                         } else {
-                            // Per-layer output bindings (non-DKS). Write only layers that
-                            // changed. Base (0) must never be all-zero — that silences the
-                            // key, which has no ROM fallback — while the overlay layers
-                            // treat an empty entry as transparent fall-through.
-                            for layer in 0..3usize {
-                                if modal.outputs[layer] == modal.outputs_orig[layer] {
+                            // Outside DKS only layers 0/1 and Fn are meaningful. Write
+                            // just what changed; layer 0 must never go all-zero, since
+                            // the base layer has no ROM fallback and would be silenced.
+                            let changed = [
+                                (0usize, modal.slots[0], modal.slots_orig[0]),
+                                (1, modal.slots[1], modal.slots_orig[1]),
+                                (
+                                    FN_WIRE_LAYER as usize,
+                                    modal.fn_action,
+                                    modal.fn_action_orig,
+                                ),
+                            ];
+                            for (layer, now, before) in changed {
+                                if now == before {
                                     continue;
                                 }
-                                let bytes = modal.outputs[layer].to_config_bytes();
+                                let bytes = now.to_config_bytes();
                                 if layer == 0 && bytes == [0, 0, 0, 0] {
                                     continue;
                                 }
@@ -1171,8 +1162,6 @@ pub(in crate::tui) fn render_trigger_edit_modal(f: &mut Frame, app: &App, area: 
         picker.clone().render(f, popup_area);
     } else if let Some(picker) = &modal.output_picker {
         picker.clone().render(f, popup_area);
-    } else if let Some(picker) = &modal.dks_key_picker {
-        picker.clone().render(f, popup_area);
     } else if let Some((_, picker)) = &modal.dks_action_picker {
         picker.clone().render(f, popup_area);
     }
@@ -1316,7 +1305,7 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
                 ((if on { "On" } else { "Off" }).to_string(), "")
             }
             TriggerField::OutputLayer => (modal.output_layer_name().to_string(), ""),
-            TriggerField::Output => (modal.outputs[modal.output_layer].to_string(), ""),
+            TriggerField::Output => (modal.output_action().to_string(), ""),
             TriggerField::SnapTapPartner => {
                 let label = match modal.snaptap_partner {
                     Some(idx) => modal
@@ -1331,16 +1320,9 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
             }
             TriggerField::DksBinding => (format!("{} / 4", modal.dks_binding_index + 1), ""),
             TriggerField::DksBindingKey => {
-                let binding = modal.dks_binding_index;
-                let label = if let Some(idx) = modal.dks_binding_keys[binding] {
-                    modal
-                        .key_choices
-                        .iter()
-                        .find(|(_, i)| *i == idx)
-                        .map(|(l, _)| l.clone())
-                        .unwrap_or_else(|| slot_label(modal.dks_bindings[binding]))
-                } else {
-                    slot_label(modal.dks_bindings[binding])
+                let label = match modal.slots[modal.dks_binding_index] {
+                    KeyAction::Disabled => "(none)".to_string(),
+                    action => action.to_string(),
                 };
                 (label, "")
             }
@@ -1350,7 +1332,7 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
             | TriggerField::DksAct3 => {
                 let idx = field.dks_action_index().unwrap();
                 (
-                    modal.dks_bindings[modal.dks_binding_index].phase_actions[idx].to_string(),
+                    modal.dks_phases[modal.dks_binding_index][idx].to_string(),
                     "",
                 )
             }
