@@ -1212,7 +1212,21 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                         let coarse = key.modifiers.contains(KeyModifiers::SHIFT);
                         match key.code {
                             KeyCode::Esc => app.close_trigger_edit_modal(),
-                            KeyCode::Enter => app.save_trigger_edit_modal(),
+                            // Enter activates the focused row — opens its picker,
+                            // flips a toggle, or commits from the Save button.
+                            KeyCode::Enter => {
+                                let save = app
+                                    .trigger_edit_modal
+                                    .as_mut()
+                                    .is_some_and(|m| m.activate_current());
+                                if save {
+                                    app.save_trigger_edit_modal();
+                                }
+                            }
+                            // Save from anywhere in the modal.
+                            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                app.save_trigger_edit_modal();
+                            }
                             KeyCode::Tab | KeyCode::Down => {
                                 if let Some(ref mut modal) = app.trigger_edit_modal {
                                     modal.next_field();

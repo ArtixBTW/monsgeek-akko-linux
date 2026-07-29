@@ -44,17 +44,35 @@ impl<T> PopupSelect<T> {
     }
 
     /// Recompute the filtered view and clamp the selection into it.
+    ///
+    /// Matches are substring, but ranked so that exact hits come first, then
+    /// prefixes, then the rest — typing "s" should offer S, Shift and Space before
+    /// Escape or Insert. Ties keep the original order, so the ranking is stable.
     fn refilter(&mut self) {
         let needle = self.filter.to_ascii_lowercase();
-        self.filtered = self
+        let rank = |label: &str| -> Option<u8> {
+            if needle.is_empty() {
+                return Some(0);
+            }
+            let label = label.to_ascii_lowercase();
+            if label == needle {
+                Some(0)
+            } else if label.starts_with(&needle) {
+                Some(1)
+            } else if label.contains(&needle) {
+                Some(2)
+            } else {
+                None
+            }
+        };
+        let mut ranked: Vec<(u8, usize)> = self
             .items
             .iter()
             .enumerate()
-            .filter(|(_, (label, _))| {
-                needle.is_empty() || label.to_ascii_lowercase().contains(&needle)
-            })
-            .map(|(i, _)| i)
+            .filter_map(|(i, (label, _))| rank(label).map(|r| (r, i)))
             .collect();
+        ranked.sort_by_key(|&(r, i)| (r, i));
+        self.filtered = ranked.into_iter().map(|(_, i)| i).collect();
         if self.filtered.is_empty() {
             self.state.select(None);
         } else {
@@ -193,6 +211,29 @@ mod tests {
     fn empty_selector_has_no_selection() {
         let p: PopupSelect<u8> = PopupSelect::new("t", vec![]);
         assert_eq!(p.selected(), None);
+    }
+
+    /// Typing a letter should offer the exact key, then names starting with it,
+    /// before mere substring hits.
+    #[test]
+    fn filter_ranks_exact_then_prefix_then_substring() {
+        let mut p = PopupSelect::new(
+            "t",
+            vec![
+                ("Escape".into(), 1),
+                ("LShift".into(), 2),
+                ("S".into(), 3),
+                ("Space".into(), 4),
+            ],
+        );
+        p.push_filter('s');
+        assert_eq!(p.selected(), Some(&3)); // exact "S"
+        p.down();
+        assert_eq!(p.selected(), Some(&4)); // prefix "Space"
+        p.down();
+        assert_eq!(p.selected(), Some(&1)); // substring "Escape" (original order)
+        p.down();
+        assert_eq!(p.selected(), Some(&2)); // substring "LShift"
     }
 
     #[test]

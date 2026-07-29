@@ -54,6 +54,8 @@ pub(in crate::tui) enum TriggerField {
     DksAct1,
     DksAct2,
     DksAct3,
+    /// Not a setting — the modal's Save button, focusable like any other row.
+    Save,
 }
 
 impl TriggerField {
@@ -85,6 +87,7 @@ impl TriggerField {
         Self::append_fields(&mut fields, Self::CORE_TRAVEL);
         Self::append_fields(&mut fields, Self::RT_SENSITIVITY);
         Self::append_fields(&mut fields, Self::DEADZONES);
+        fields.push(Self::Save);
         fields
     }
 
@@ -141,6 +144,7 @@ impl TriggerField {
                 }
             }
         }
+        fields.push(Self::Save);
         fields
     }
 
@@ -173,6 +177,7 @@ impl TriggerField {
             Self::DksAct1 => DksPhase::PressFull.short_label(),
             Self::DksAct2 => DksPhase::ReleaseFull.short_label(),
             Self::DksAct3 => DksPhase::ReleaseShallow.short_label(),
+            Self::Save => "Save",
         }
     }
 
@@ -230,7 +235,8 @@ impl TriggerField {
             | Self::DksAct0
             | Self::DksAct1
             | Self::DksAct2
-            | Self::DksAct3 => None,
+            | Self::DksAct3
+            | Self::Save => None,
         }
     }
 
@@ -474,7 +480,8 @@ impl TriggerEditModal {
             | TriggerField::DksAct0
             | TriggerField::DksAct1
             | TriggerField::DksAct2
-            | TriggerField::DksAct3 => 0.0,
+            | TriggerField::DksAct3
+            | TriggerField::Save => 0.0,
         }
     }
 
@@ -499,8 +506,31 @@ impl TriggerEditModal {
             | TriggerField::DksAct0
             | TriggerField::DksAct1
             | TriggerField::DksAct2
-            | TriggerField::DksAct3 => {}
+            | TriggerField::DksAct3
+            | TriggerField::Save => {}
         }
+    }
+
+    /// Act on the focused field, as Enter does: open its picker, flip a toggle,
+    /// cycle a selector. Returns true when the field is the Save button, which the
+    /// caller commits — spinner rows do nothing, since ←/→ is how they're adjusted.
+    #[must_use]
+    pub(in crate::tui) fn activate_current(&mut self) -> bool {
+        match self.current_field() {
+            TriggerField::Save => return true,
+            TriggerField::Mode => self.open_mode_picker(),
+            TriggerField::OutputLayer => self.cycle_output_layer(true),
+            TriggerField::Output => self.open_output_picker(),
+            TriggerField::SnapTapPartner => self.open_key_picker(),
+            TriggerField::DksBindingKey => self.open_dks_slot_picker(),
+            TriggerField::DksBinding => self.cycle_dks_binding(true),
+            TriggerField::RapidTrigger => self.toggle_rapid_trigger(),
+            field if field.dks_action_index().is_some() => {
+                self.open_dks_action_picker(field.dks_action_index().unwrap());
+            }
+            _ => {}
+        }
+        false
     }
 
     /// Increment the current field: spinner up, or open a picker / flip the RT
@@ -1211,7 +1241,7 @@ pub(in crate::tui) fn render_trigger_edit_modal(f: &mut Frame, app: &App, area: 
     let help_text = if modal.output_picker.is_some() {
         "type: filter | ↑↓: pick | Tab: add to chord | Enter: confirm | Esc: cancel"
     } else {
-        "Tab/↑↓: field | ←/→: adjust/toggle | Enter: save | Esc: cancel"
+        "Tab/↑↓: field | ←/→: adjust | Enter: open/activate | ^S: save | Esc: cancel"
     };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
@@ -1358,6 +1388,25 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
 
     for (i, field) in fields.iter().enumerate() {
         let is_selected = i == modal.field_index;
+
+        // The Save button is a row, not a setting — render it as a button.
+        if *field == TriggerField::Save {
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Green)
+            };
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled("[ Save ]", style),
+            ]));
+            continue;
+        }
+
         let label = format!("{:12}", field.label_for(modal.mode));
 
         // Get value and unit from spinner config, or special handling for the
@@ -1417,6 +1466,7 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
                     | TriggerField::Output
                     | TriggerField::SnapTapPartner
                     | TriggerField::DksBinding
+                    | TriggerField::Save
                     | TriggerField::DksBindingKey
                     | TriggerField::DksAct0
                     | TriggerField::DksAct1
@@ -1466,6 +1516,8 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
         Span::styled("↑/↓", Style::default().fg(Color::Cyan)),
         Span::raw(" select  "),
         Span::styled("Enter", Style::default().fg(Color::Green)),
+        Span::raw(" open  "),
+        Span::styled("^S", Style::default().fg(Color::Green)),
         Span::raw(" save  "),
         Span::styled("Esc", Style::default().fg(Color::Red)),
         Span::raw(" cancel"),
