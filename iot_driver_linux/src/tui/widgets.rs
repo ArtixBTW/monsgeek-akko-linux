@@ -104,6 +104,12 @@ impl<T> PopupSelect<T> {
         self.items.get(idx).map(|(_, v)| v)
     }
 
+    /// Replace the title, for selectors whose header reflects state built up while
+    /// the popup is open.
+    pub(crate) fn set_title(&mut self, title: impl Into<String>) {
+        self.title = title.into();
+    }
+
     /// Preselect the first (visible) row whose value satisfies `pred` (no-op if
     /// none match), so the popup opens on the current value.
     pub(crate) fn select_where(&mut self, pred: impl Fn(&T) -> bool) {

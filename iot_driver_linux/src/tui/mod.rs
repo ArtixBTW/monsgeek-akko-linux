@@ -1112,7 +1112,11 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                         .trigger_edit_modal
                                         .as_mut()
                                         .and_then(|m| m.output_picker.take())
-                                        .and_then(|p| p.selected().copied());
+                                        .and_then(|p| p.selected().copied())
+                                        .map(|highlighted| {
+                                            let m = app.trigger_edit_modal.as_ref().unwrap();
+                                            m.picked_action(highlighted)
+                                        });
                                     if let (Some(action), Some(m)) =
                                         (picked, app.trigger_edit_modal.as_mut())
                                     {
@@ -1150,16 +1154,21 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                     KeyCode::Esc => modal.key_picker = None,
                                     _ => {}
                                 }
-                            } else if let Some(p) = modal.output_picker.as_mut() {
-                                // Long list — type to filter. Only arrows navigate
-                                // here (j/k/letters are filter input, not motion).
-                                match key.code {
-                                    KeyCode::Up => p.up(),
-                                    KeyCode::Down => p.down(),
-                                    KeyCode::Backspace => p.pop_filter(),
-                                    KeyCode::Char(c) => p.push_filter(c),
-                                    KeyCode::Esc => modal.output_picker = None,
-                                    _ => {}
+                            } else if modal.output_picker.is_some() {
+                                // Long list — type to filter, so only arrows navigate
+                                // (j/k/letters are filter input) and Tab stages a
+                                // chord key rather than moving focus.
+                                if key.code == KeyCode::Tab {
+                                    modal.toggle_chord_key();
+                                } else if let Some(p) = modal.output_picker.as_mut() {
+                                    match key.code {
+                                        KeyCode::Up => p.up(),
+                                        KeyCode::Down => p.down(),
+                                        KeyCode::Backspace => p.pop_filter(),
+                                        KeyCode::Char(c) => p.push_filter(c),
+                                        KeyCode::Esc => modal.output_picker = None,
+                                        _ => {}
+                                    }
                                 }
                             } else if let Some((_, p)) = modal.dks_action_picker.as_mut() {
                                 match key.code {

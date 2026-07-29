@@ -6,6 +6,7 @@ use ratatui::{prelude::*, widgets::*};
 use std::collections::VecDeque;
 
 use crate::key_action::KeyAction;
+use crate::protocol::hid;
 use crate::tui::widgets::PopupSelect;
 use crate::TriggerSettings;
 use monsgeek_keyboard::{
@@ -321,6 +322,11 @@ pub(in crate::tui) struct TriggerEditModal {
     /// Open output picker: any HID key or consumer/media control. Shared by the
     /// per-layer output field and the DKS slot field — both edit a keymatrix entry.
     pub output_picker: Option<PopupSelect<KeyAction>>,
+    /// Usages staged with Tab while the output picker is open, so a slot can be set
+    /// to a chord (`Ctrl+C`) rather than a single key. Empty = picking one key.
+    pub chord_buf: Vec<u8>,
+    /// The output picker's title without the chord preview, for rebuilding it.
+    pub picker_title: String,
 }
 
 impl TriggerEditModal {
@@ -354,6 +360,8 @@ impl TriggerEditModal {
             fn_action_orig: KeyAction::Disabled,
             output_layer: 0,
             output_picker: None,
+            chord_buf: Vec::new(),
+            picker_title: String::new(),
         }
     }
 
@@ -399,6 +407,8 @@ impl TriggerEditModal {
             fn_action_orig: prefetch.fn_action,
             output_layer: 0,
             output_picker: None,
+            chord_buf: Vec::new(),
+            picker_title: String::new(),
         }
     }
 
@@ -663,9 +673,59 @@ impl TriggerEditModal {
                 .iter()
                 .map(|&(code, name)| (format!("{name} (media)"), KeyAction::Consumer(code))),
         );
-        let mut picker = PopupSelect::new(format!("{title} output"), items);
+        self.picker_title = format!("{title} output");
+        self.chord_buf.clear();
+        let mut picker = PopupSelect::new(self.picker_title.clone(), items);
         picker.select_where(|&a| a == current);
         self.output_picker = Some(picker);
+    }
+
+    /// Stage/unstage the highlighted key as part of a chord (Tab in the picker).
+    ///
+    /// Only plain keys can be chorded: the three usage slots all live under
+    /// config_type 0, so a media key or macro occupies the whole entry.
+    pub(in crate::tui) fn toggle_chord_key(&mut self) {
+        let Some(&KeyAction::Key(usage)) = self.output_picker.as_ref().and_then(|p| p.selected())
+        else {
+            return;
+        };
+        if let Some(pos) = self.chord_buf.iter().position(|&u| u == usage) {
+            self.chord_buf.remove(pos);
+        } else if self.chord_buf.len() < crate::key_action::CHORD_SLOTS {
+            self.chord_buf.push(usage);
+        }
+        let staged = self.chord_preview();
+        if let Some(p) = self.output_picker.as_mut() {
+            p.set_title(staged);
+        }
+    }
+
+    fn chord_preview(&self) -> String {
+        if self.chord_buf.is_empty() {
+            return self.picker_title.clone();
+        }
+        let keys = self
+            .chord_buf
+            .iter()
+            .map(|&u| hid::key_name(u))
+            .collect::<Vec<_>>()
+            .join("+");
+        format!("{} [{}+…]", self.picker_title, keys)
+    }
+
+    /// The action the picker should commit: the staged chord plus whatever is
+    /// highlighted, or just the highlighted action when nothing is staged.
+    pub(in crate::tui) fn picked_action(&self, highlighted: KeyAction) -> KeyAction {
+        if self.chord_buf.is_empty() {
+            return highlighted;
+        }
+        let mut usages = self.chord_buf.clone();
+        if let KeyAction::Key(u) = highlighted {
+            if !usages.contains(&u) {
+                usages.push(u);
+            }
+        }
+        KeyAction::chord(usages)
     }
 
     pub(in crate::tui) fn open_dks_action_picker(&mut self, action_idx: usize) {
@@ -1147,8 +1207,12 @@ pub(in crate::tui) fn render_trigger_edit_modal(f: &mut Frame, app: &App, area: 
     // Render editable fields
     render_modal_fields(f, modal, chunks[1]);
 
-    // Render help line
-    let help_text = "Tab/↑↓: field | ←/→: adjust/toggle | Enter: save | Esc: cancel";
+    // Render help line — the output picker rebinds Tab, so say so while it is open.
+    let help_text = if modal.output_picker.is_some() {
+        "type: filter | ↑↓: pick | Tab: add to chord | Enter: confirm | Esc: cancel"
+    } else {
+        "Tab/↑↓: field | ←/→: adjust/toggle | Enter: save | Esc: cancel"
+    };
     let help = Paragraph::new(help_text)
         .style(Style::default().fg(Color::DarkGray))
         .alignment(Alignment::Center);
@@ -1409,4 +1473,59 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
 
     let paragraph = Paragraph::new(lines);
     f.render_widget(paragraph, area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn modal() -> TriggerEditModal {
+        TriggerEditModal::new_global(&TriggerSettings::default(), Precision::default())
+    }
+
+    /// Nothing staged: Enter takes whatever is highlighted, chord or not.
+    #[test]
+    fn picked_action_without_staging_is_the_highlighted_row() {
+        let m = modal();
+        assert_eq!(m.picked_action(KeyAction::Key(0x06)), KeyAction::Key(0x06));
+        assert_eq!(
+            m.picked_action(KeyAction::Consumer(0x00E9)),
+            KeyAction::Consumer(0x00E9)
+        );
+    }
+
+    /// Staged usages combine with the highlighted key, in staging order.
+    #[test]
+    fn picked_action_appends_highlighted_key_to_staged_chord() {
+        let mut m = modal();
+        m.chord_buf = vec![0xE0];
+        assert_eq!(
+            m.picked_action(KeyAction::Key(0x06)),
+            KeyAction::Combo {
+                keys: [0xE0, 0x06, 0]
+            }
+        );
+        // Confirming on a key that is already staged must not duplicate it.
+        m.chord_buf = vec![0xE0, 0x06];
+        assert_eq!(
+            m.picked_action(KeyAction::Key(0x06)),
+            KeyAction::Combo {
+                keys: [0xE0, 0x06, 0]
+            }
+        );
+    }
+
+    /// A media key can't join a chord — it occupies the whole entry — so it is
+    /// dropped rather than corrupting the staged usages.
+    #[test]
+    fn picked_action_ignores_non_key_highlight_while_staging() {
+        let mut m = modal();
+        m.chord_buf = vec![0xE0, 0x06];
+        assert_eq!(
+            m.picked_action(KeyAction::Consumer(0x00E9)),
+            KeyAction::Combo {
+                keys: [0xE0, 0x06, 0]
+            }
+        );
+    }
 }
