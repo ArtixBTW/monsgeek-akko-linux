@@ -256,6 +256,11 @@ pub mod matrix {
 // Layer
 // ---------------------------------------------------------------------------
 
+/// Wire `layer` value that selects the Fn store (SET_FN / GET_FN) instead of a
+/// keymatrix layer. Keymatrix layers are 0–3; in DKS mode all four are the key's
+/// output slots, so this value is deliberately outside that range.
+pub const FN_WIRE_LAYER: u8 = 2;
+
 /// Logical key layer on the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Layer {
@@ -289,12 +294,13 @@ impl Layer {
         }
     }
 
-    /// Wire value used by `set_key_config(profile, index, layer, config)`.
+    /// Wire value used by the key-config writers. `Fn` is [`FN_WIRE_LAYER`],
+    /// which selects the separate SET_FN store rather than a keymatrix layer.
     pub fn wire_layer(self) -> u8 {
         match self {
             Layer::Base => 0,
             Layer::Layer1 => 1,
-            Layer::Fn => 2,
+            Layer::Fn => FN_WIRE_LAYER,
         }
     }
 

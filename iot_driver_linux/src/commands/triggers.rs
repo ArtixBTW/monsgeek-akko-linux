@@ -2,10 +2,9 @@
 
 use super::CommandResult;
 use iot_driver::key_action::KeyAction;
-use iot_driver::protocol::hid;
 use monsgeek_keyboard::{
-    DksAction, DksBinding, DksCombo, DksConfig, DksPhase, KeyMode, KeyTriggerSettings,
-    KeyboardInterface, ModeByte,
+    DksAction, DksBinding, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, KeyboardInterface,
+    ModeByte,
 };
 use std::collections::{BTreeSet, HashSet};
 use std::io::Write;
@@ -685,23 +684,20 @@ pub fn set_modtap_time(keyboard: &KeyboardInterface, key: u8, ms: u16) -> Comman
     Ok(())
 }
 
-fn parse_dks_combo(spec: &str) -> Result<DksCombo, String> {
-    let mut codes = [0u8; 3];
-    for (i, part) in spec
-        .split(',')
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .take(3)
-        .enumerate()
-    {
-        let action: KeyAction = part
+/// Parse one DKS output slot. A slot is an ordinary keymatrix entry — the firmware
+/// dispatches it through the same `keycode_dispatch` as a normal keypress — so it
+/// accepts any action, e.g. `"Ctrl+C"`, `"Macro(0)"` or a media key. Comma-separated
+/// keys are also accepted as a chord shorthand.
+fn parse_dks_slot(spec: &str) -> Result<[u8; 4], String> {
+    let spec = spec.trim();
+    let action: KeyAction = if spec.contains(',') {
+        spec.replace(',', "+")
             .parse()
-            .map_err(|e| format!("slot key '{part}': {e}"))?;
-        codes[i] = action
-            .primary_usage()
-            .ok_or_else(|| format!("slot key '{part}': need a keyboard key"))?;
-    }
-    Ok(DksCombo::new(codes[0], codes[1], codes[2]))
+            .map_err(|e| format!("slot '{spec}': {e}"))?
+    } else {
+        spec.parse().map_err(|e| format!("slot '{spec}': {e}"))?
+    };
+    Ok(action.to_config_bytes())
 }
 
 fn parse_dks_actions(spec: &str) -> Result<[DksAction; 4], String> {
@@ -723,15 +719,6 @@ fn parse_dks_actions(spec: &str) -> Result<[DksAction; 4], String> {
         };
     }
     Ok(out)
-}
-
-fn format_dks_combo(combo: DksCombo) -> String {
-    [combo.skey, combo.key, combo.key2]
-        .iter()
-        .filter(|&&c| c != 0)
-        .map(|&c| hid::key_name(c).to_string())
-        .collect::<Vec<_>>()
-        .join("+")
 }
 
 /// Show or configure DKS (Dynamic Keystroke) for a key.
@@ -772,7 +759,7 @@ pub fn dks(
             return Err(format!("--modes requires 4 bytes, got {}", bytes.len()).into());
         }
         for (i, &b) in bytes.iter().enumerate() {
-            config.bindings[i] = DksBinding::from_packed_mode(b, config.bindings[i].combo);
+            config.bindings[i] = DksBinding::from_packed_mode(b, config.bindings[i].config);
         }
     }
 
@@ -787,12 +774,11 @@ pub fn dks(
         }
         for (i, binding_spec) in binding_specs.iter().enumerate() {
             if binding_spec.is_empty() {
-                config.bindings[i].combo = DksCombo::default();
+                config.bindings[i].config = [0; 4];
                 continue;
             }
             let parts: Vec<&str> = binding_spec.split(':').collect();
-            let combo = parse_dks_combo(parts[0])?;
-            config.bindings[i].combo = combo;
+            config.bindings[i].config = parse_dks_slot(parts[0])?;
             if parts.len() > 1 {
                 config.bindings[i].phase_actions = parse_dks_actions(parts[1])?;
             }
@@ -827,10 +813,10 @@ fn show_dks(keyboard: &KeyboardInterface, key: u8) -> CommandResult {
             );
             println!("  Binding rows (packed): {:02X?}", config.trigger_modes());
             for (i, binding) in config.bindings.iter().enumerate() {
-                let combo = if binding.combo.is_empty() {
+                let combo = if binding.is_empty() {
                     "(empty)".to_string()
                 } else {
-                    format_dks_combo(binding.combo)
+                    KeyAction::from_config_bytes(binding.config).to_string()
                 };
                 let phases: Vec<String> = DksPhase::ALL
                     .iter()
@@ -875,7 +861,7 @@ pub fn dks_roundtrip(keyboard: &KeyboardInterface, key: u8, op: &str) -> Command
     match op {
         "travel" => keyboard.set_dks_trigger_point_travel_raw(key, 70)?,
         "modes" => keyboard.set_dks_trigger_modes(key, [0, 0, 0, 0])?,
-        "combo" => keyboard.set_dks_combo_binding(0, key, 0, DksCombo::default(), true)?,
+        "combo" => keyboard.set_keymatrix_config(0, key, 0, [0; 4], true)?,
         "mode-all" => keyboard.set_mode_all(ModeByte::new(KeyMode::Normal, false))?,
         "keytrig" => keyboard.set_key_trigger(&orig_trigger)?,
         _ => {

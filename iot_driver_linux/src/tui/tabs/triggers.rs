@@ -10,9 +10,9 @@ use crate::protocol::hid;
 use crate::tui::widgets::PopupSelect;
 use crate::TriggerSettings;
 use monsgeek_keyboard::{
-    DksAction, DksBinding, DksCombo, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, ModeByte,
-    Precision,
+    DksAction, DksBinding, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, ModeByte, Precision,
 };
+use monsgeek_transport::protocol::FN_WIRE_LAYER;
 
 use super::super::keys::{all_hid_keys, CONSUMER_KEYS};
 use super::super::shared::{AsyncResult, LoadState, SpinnerConfig};
@@ -316,13 +316,13 @@ pub(in crate::tui) struct TriggerEditModal {
     pub output_picker: Option<PopupSelect<KeyAction>>,
 }
 
-fn format_dks_combo(combo: DksCombo) -> String {
-    [combo.skey, combo.key, combo.key2]
-        .iter()
-        .filter(|&&c| c != 0)
-        .map(|&c| hid::key_name(c).to_string())
-        .collect::<Vec<_>>()
-        .join("+")
+/// Human label for one DKS output slot.
+fn slot_label(binding: DksBinding) -> String {
+    if binding.is_empty() {
+        "(none)".to_string()
+    } else {
+        KeyAction::from_config_bytes(binding.config).to_string()
+    }
 }
 
 impl TriggerEditModal {
@@ -777,16 +777,13 @@ impl App {
         })
     }
 
-    /// Best-effort reverse lookup: which matrix key emits the combo's primary HID.
-    fn dks_binding_key_for_combo(
+    /// Best-effort reverse lookup: which matrix key emits this slot's primary usage.
+    fn dks_binding_key_for_slot(
         &self,
-        combo: DksCombo,
+        config: [u8; 4],
         key_choices: &[(String, u8)],
     ) -> Option<u8> {
-        let hid_code = combo.key.max(combo.skey).max(combo.key2);
-        if hid_code == 0 {
-            return None;
-        }
+        let hid_code = KeyAction::from_config_bytes(config).primary_usage()?;
         key_choices
             .iter()
             .map(|(_, i)| *i)
@@ -826,7 +823,7 @@ impl App {
                     let mut binding_keys = [None; 4];
                     for (i, binding) in cfg.bindings.iter().enumerate() {
                         binding_keys[i] =
-                            self.dks_binding_key_for_combo(binding.combo, &key_choices);
+                            self.dks_binding_key_for_slot(binding.config, &key_choices);
                     }
                     DksEditState {
                         travel_mm: cfg.trigger_point_travel_raw as f32 / factor,
@@ -1009,9 +1006,8 @@ impl App {
                         } else {
                             // Per-layer output bindings (non-DKS). Write only layers that
                             // changed. Base (0) must never be all-zero — that silences the
-                            // key — and Base/Layer1 (keymatrix) commit via the settling
-                            // combo path; Fn goes to the separate Fn table (SET_FN). The
-                            // overlay layers treat an empty entry as transparent.
+                            // key, which has no ROM fallback — while the overlay layers
+                            // treat an empty entry as transparent fall-through.
                             for layer in 0..3usize {
                                 if modal.outputs[layer] == modal.outputs_orig[layer] {
                                     continue;
@@ -1020,19 +1016,10 @@ impl App {
                                 if layer == 0 && bytes == [0, 0, 0, 0] {
                                     continue;
                                 }
-                                let res = if layer < 2 {
-                                    match DksCombo::from_config_bytes(bytes) {
-                                        Some(combo) => keyboard.set_dks_combo_binding(
-                                            0,
-                                            key,
-                                            layer as u8,
-                                            combo,
-                                            true,
-                                        ),
-                                        None => keyboard.set_key_config(0, key, layer as u8, bytes),
-                                    }
+                                let res = if layer as u8 == FN_WIRE_LAYER {
+                                    keyboard.set_fn_config(0, key, bytes)
                                 } else {
-                                    keyboard.set_key_config(0, key, 2, bytes)
+                                    keyboard.set_keymatrix_config(0, key, layer as u8, bytes, true)
                                 };
                                 if let Err(e) = res {
                                     extra.push(format!("output L{layer}: {e}"));
@@ -1351,11 +1338,9 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
                         .iter()
                         .find(|(_, i)| *i == idx)
                         .map(|(l, _)| l.clone())
-                        .unwrap_or_else(|| format_dks_combo(modal.dks_bindings[binding].combo))
-                } else if modal.dks_bindings[binding].combo.is_empty() {
-                    "(none)".to_string()
+                        .unwrap_or_else(|| slot_label(modal.dks_bindings[binding]))
                 } else {
-                    format_dks_combo(modal.dks_bindings[binding].combo)
+                    slot_label(modal.dks_bindings[binding])
                 };
                 (label, "")
             }

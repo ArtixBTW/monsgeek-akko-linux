@@ -401,46 +401,16 @@ impl std::fmt::Display for DksAction {
     }
 }
 
-/// Up to three simultaneous HID keycodes for one DKS output binding (grid row).
-///
-/// Wire format in SET_KEYMATRIX layer 0–3: `[0, skey, key, key2]` per
-/// `MatrixUtils.configToMatrix` combo branch in the vendor webapp.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct DksCombo {
-    pub skey: u8,
-    pub key: u8,
-    pub key2: u8,
-}
-
-impl DksCombo {
-    pub const fn new(skey: u8, key: u8, key2: u8) -> Self {
-        Self { skey, key, key2 }
-    }
-
-    pub fn from_config_bytes(bytes: [u8; 4]) -> Option<Self> {
-        if bytes[0] != 0 {
-            return None;
-        }
-        Some(Self {
-            skey: bytes[1],
-            key: bytes[2],
-            key2: bytes[3],
-        })
-    }
-
-    pub fn to_config_bytes(self) -> [u8; 4] {
-        [0, self.skey, self.key, self.key2]
-    }
-
-    pub fn is_empty(self) -> bool {
-        self.skey == 0 && self.key == 0 && self.key2 == 0
-    }
-}
-
 /// One of four DKS output bindings (vendor grid row) on a physical key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct DksBinding {
-    pub combo: DksCombo,
+    /// The raw 4-byte keymatrix entry this DKS slot emits, `[config_type, b1, b2, b3]`.
+    ///
+    /// DKS phases dispatch through the same `keycode_dispatch` as an ordinary
+    /// keypress (firmware reads sub-layers 0–3 for the key), so a slot may hold any
+    /// action — a chord, a consumer usage, a macro — not just plain keys. Semantics
+    /// live in the driver's `KeyAction`; this crate only moves the bytes.
+    pub config: [u8; 4],
     /// Segment roles at each [`DksPhase`] stop (indexed by [`DksPhase::index`]).
     pub phase_actions: [DksAction; 4],
 }
@@ -478,11 +448,16 @@ impl DksBinding {
         Self::pack_phase_actions(self.phase_actions)
     }
 
-    pub fn from_packed_mode(byte: u8, combo: DksCombo) -> Self {
+    pub fn from_packed_mode(byte: u8, config: [u8; 4]) -> Self {
         Self {
-            combo,
+            config,
             phase_actions: Self::unpack_phase_actions(byte),
         }
+    }
+
+    /// True when this slot emits nothing at all.
+    pub fn is_empty(self) -> bool {
+        self.config == [0; 4]
     }
 }
 
@@ -523,9 +498,9 @@ impl DksConfig {
     pub fn from_parts(
         trigger_point_travel_raw: u16,
         modes: [u8; 4],
-        combos: [DksCombo; 4],
+        configs: [[u8; 4]; 4],
     ) -> Self {
-        let bindings = std::array::from_fn(|i| DksBinding::from_packed_mode(modes[i], combos[i]));
+        let bindings = std::array::from_fn(|i| DksBinding::from_packed_mode(modes[i], configs[i]));
         Self {
             trigger_point_travel_raw,
             bindings,
@@ -602,9 +577,16 @@ mod tests {
     }
 
     #[test]
-    fn dks_combo_wire_bytes() {
-        let c = DksCombo::new(0xE0, 0x04, 0x06);
-        assert_eq!(c.to_config_bytes(), [0, 0xE0, 0x04, 0x06]);
-        assert_eq!(DksCombo::from_config_bytes([0, 0xE0, 0x04, 0x06]), Some(c));
+    fn dks_binding_carries_raw_config_bytes() {
+        // Ctrl+A+C as three usages, exactly as the vendor's configToMatrix emits it.
+        let b = DksBinding::from_packed_mode(0, [0, 0xE0, 0x04, 0x06]);
+        assert_eq!(b.config, [0, 0xE0, 0x04, 0x06]);
+        assert!(!b.is_empty());
+        // A DKS slot may also hold a non-key action, e.g. Macro(3).
+        assert_eq!(
+            DksBinding::from_packed_mode(0, [9, 0, 3, 0]).config,
+            [9, 0, 3, 0]
+        );
+        assert!(DksBinding::from_packed_mode(0, [0; 4]).is_empty());
     }
 }

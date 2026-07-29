@@ -221,7 +221,11 @@ pub fn set_key(
     layer: Layer,
     action: &KeyAction,
 ) -> Result<(), KeyboardError> {
-    kb.set_key_config(0, index, layer.wire_layer(), action.to_config_bytes())
+    let config = action.to_config_bytes();
+    match layer {
+        Layer::Fn => kb.set_fn_config(0, index, config),
+        _ => kb.set_keymatrix_config(0, index, layer.wire_layer(), config, true),
+    }
 }
 
 /// Factory-default HID keycode for a matrix position, derived from its name.

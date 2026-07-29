@@ -287,9 +287,10 @@ pub enum Commands {
         /// Four packed trigger-mode bytes, comma-separated hex (e.g. "09,00,00,00")
         #[arg(long)]
         modes: Option<String>,
-        /// Four slots: `combo` or `combo:actions` separated by `;`
+        /// Four slots: `output` or `output:actions` separated by `;`
+        /// An output is any key action — a key, a chord, a media key, `Macro(0)`.
         /// Actions are four comma-separated values (none/single/until_next/across).
-        /// Example: `A:1,0,0,0;B;Ctrl,C:2,0,0,0;`
+        /// Example: `A:1,0,0,0;B;Ctrl+C:2,0,0,0;VolumeUp`
         #[arg(long)]
         slots: Option<String>,
         /// Enable/disable Rapid Trigger while setting DKS

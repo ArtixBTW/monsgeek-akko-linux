@@ -50,8 +50,8 @@ use crate::{cmd, devices, FirmwareSettings, TriggerSettings};
 
 // Keyboard abstraction layer - using async interface directly
 use monsgeek_keyboard::{
-    led::speed_to_wire, DksCombo, KeyboardInterface, Precision, SleepTimeSettings,
-    TimestampedEvent, VendorEvent,
+    led::speed_to_wire, KeyboardInterface, Precision, SleepTimeSettings, TimestampedEvent,
+    VendorEvent,
 };
 use monsgeek_transport::{FlowControlTransport, HidDiscovery, Transport};
 
@@ -1129,13 +1129,16 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                                         let sel = picker.selected().copied().flatten();
                                         (m.dks_binding_index, sel)
                                     };
-                                    let combo = match selected {
-                                        Some(ki) => DksCombo::new(0, app.key_output_hid(ki), 0),
-                                        None => DksCombo::default(),
+                                    let config = match selected {
+                                        Some(ki) => crate::key_action::KeyAction::Key(
+                                            app.key_output_hid(ki),
+                                        )
+                                        .to_config_bytes(),
+                                        None => [0; 4],
                                     };
                                     if let Some(m) = app.trigger_edit_modal.as_mut() {
                                         m.dks_binding_keys[slot_idx] = selected;
-                                        m.dks_bindings[slot_idx].combo = combo;
+                                        m.dks_bindings[slot_idx].config = config;
                                     }
                                 }
                                 Some(PickerConfirm::DksAction) => {

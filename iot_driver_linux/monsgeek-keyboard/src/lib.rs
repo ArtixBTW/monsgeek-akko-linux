@@ -13,8 +13,8 @@ pub mod sync;
 pub use error::KeyboardError;
 pub use led::{LedMode, LedParams, RgbColor};
 pub use magnetism::{
-    DksAction, DksBinding, DksCombo, DksConfig, DksPhase, KeyDepthEvent, KeyMode,
-    KeyTriggerSettings, KeyTriggerSettingsDetail, ModeByte, TravelDepth, TriggerSettings,
+    DksAction, DksBinding, DksConfig, DksPhase, KeyDepthEvent, KeyMode, KeyTriggerSettings,
+    KeyTriggerSettingsDetail, ModeByte, TravelDepth, TriggerSettings,
 };
 pub use settings::{
     BatteryInfo, FeatureList, FirmwareVersion, KeyboardOptions, PollingRate, Precision,
@@ -83,7 +83,7 @@ pub use monsgeek_transport::{TimestampedEvent, VendorEvent};
 
 use std::sync::Arc;
 
-use monsgeek_transport::protocol::{cmd, magnetism as mag_cmd, CommandTable};
+use monsgeek_transport::protocol::{cmd, magnetism as mag_cmd, CommandTable, FN_WIRE_LAYER};
 use monsgeek_transport::{ChecksumType, FlowControlTransport, Transport};
 // Typed commands
 use monsgeek_transport::command::{
@@ -133,6 +133,19 @@ pub struct KeyboardInterface {
     protocol: ProtocolFamily,
     /// Command table for the active protocol family.
     commands: &'static CommandTable,
+}
+
+/// Which config to write into DKS slot 0.
+///
+/// Slot 0 doubles as keymatrix layer 0 — the key's *base* output once it leaves DKS
+/// mode — and the base layer has no ROM fallback, so writing it empty silences the
+/// key. When the caller leaves slot 0 empty, keep whatever the key emits today.
+fn resolve_slot0(requested: [u8; 4], current: [u8; 4]) -> [u8; 4] {
+    if requested == [0; 4] {
+        current
+    } else {
+        requested
+    }
 }
 
 impl KeyboardInterface {
@@ -1026,12 +1039,13 @@ impl KeyboardInterface {
         let travel_raw = travels.get(idx).copied().unwrap_or(0);
         let blob = self.get_dks_trigger_modes_blob()?;
         let modes = DksConfig::trigger_modes_from_blob(&blob, idx);
-        let mut combos = [DksCombo::default(); 4];
-        for (layer, combo) in combos.iter_mut().enumerate() {
-            let bytes = self.get_key_config_at_layer(0, layer as u8, key_index)?;
-            *combo = DksCombo::from_config_bytes(bytes).unwrap_or_default();
+        // Raw bytes: a DKS slot may hold any action, and decoding to a key-only
+        // type here would silently drop macros/consumer usages on the next write.
+        let mut configs = [[0u8; 4]; 4];
+        for (layer, config) in configs.iter_mut().enumerate() {
+            *config = self.get_key_config_at_layer(0, layer as u8, key_index)?;
         }
-        Ok(DksConfig::from_parts(travel_raw, modes, combos))
+        Ok(DksConfig::from_parts(travel_raw, modes, configs))
     }
 
     /// Write DKS trigger-point travel (触发点行程, u16 raw) for one key (SET subcmd 0x04).
@@ -1053,36 +1067,32 @@ impl KeyboardInterface {
         self.set_magnetism_simple(mag_cmd::DKS_TRIGGER_MODES_SET, key_index, true, &modes)
     }
 
-    /// Write one DKS output binding to keymatrix sub-layer 0–3.
+    /// Write a key's 4-byte config to keymatrix layer 0–3.
     ///
-    /// All four DKS bindings live on SET_KEYMATRIX layers 0–3 — matching the
-    /// vendor webapp `setKeyConfigSimple`, which always emits `FEA_CMD_SET_KEYMATRIX`
-    /// with the layer in the query. This deliberately bypasses
-    /// [`set_key_config`](Self::set_key_config), whose `layer > 1` path routes to
-    /// SET_FN (a separate Fn-layer store) and so would **not** round-trip with
-    /// [`get_key_config_at_layer`](Self::get_key_config_at_layer), which reads all
-    /// four layers back from GET_KEYMATRIX.
-    pub fn set_dks_combo_binding(
+    /// Layers 0/1 are the key's Base and Layer1 outputs; in DKS mode the firmware
+    /// reinterprets all four as the key's four output slots. This is SET_KEYMATRIX
+    /// (0x0A) only — the Fn layer is a *separate* store, see
+    /// [`set_fn_config`](Self::set_fn_config).
+    ///
+    /// `commit` is the keymatrix "enabled" byte, which is really the firmware's
+    /// flash-dirty/save bit (it does not gate output). Set it on only the last write
+    /// of a batch: one commit persists all the preceding RAM writes, mirroring the
+    /// vendor webapp and avoiding repeated flash saves. A commit stalls the vendor
+    /// pipeline, so it settles before returning.
+    pub fn set_keymatrix_config(
         &self,
         profile: u8,
         key_index: u8,
-        binding: u8,
-        combo: DksCombo,
+        layer: u8,
+        config: [u8; 4],
         commit: bool,
     ) -> Result<(), KeyboardError> {
-        if binding > 3 {
+        if layer > 3 {
             return Err(KeyboardError::InvalidParameter(
-                "DKS binding index must be 0–3".into(),
+                "keymatrix layer must be 0–3".into(),
             ));
         }
-        // The keymatrix "enabled" byte is really the firmware's flash-dirty/save bit
-        // (it does NOT gate output). Set it on only the LAST binding of a batch — the
-        // single commit persists all four RAM writes (mirrors the vendor webapp) and
-        // avoids four separate flash saves. A commit triggers a flash write that
-        // briefly stalls the vendor pipeline, so settle before any readback, exactly
-        // like the magnetism-simple writes.
-        let config = combo.to_config_bytes();
-        let pkt = SetKeyMatrixData::new(profile, key_index, binding, commit, config)?;
+        let pkt = SetKeyMatrixData::new(profile, key_index, layer, commit, config)?;
         if commit {
             self.transport.send_command_with_delay(
                 self.commands.set_keymatrix,
@@ -1127,21 +1137,13 @@ impl KeyboardInterface {
         // returns to Normal mode. Writing it empty stores keycode 0 and silences the
         // key (no ROM fallback for the base layer). If the caller left binding 0
         // empty, preserve the key's current layer-0 output instead of zeroing it.
-        let mut combos: [DksCombo; 4] = std::array::from_fn(|i| config.bindings[i].combo);
-        if combos[0].is_empty() {
-            if let Some(cur) =
-                DksCombo::from_config_bytes(self.get_key_config_at_layer(0, 0, key_index)?)
-            {
-                if !cur.is_empty() {
-                    combos[0] = cur;
-                }
-            }
-        }
+        let mut configs: [[u8; 4]; 4] = std::array::from_fn(|i| config.bindings[i].config);
+        configs[0] = resolve_slot0(configs[0], self.get_key_config_at_layer(0, 0, key_index)?);
 
-        for (binding, combo) in combos.into_iter().enumerate() {
+        for (binding, slot) in configs.into_iter().enumerate() {
             // Persist once, on the final binding (commit = flash-dirty + settle).
             let commit = binding == 3;
-            self.set_dks_combo_binding(0, key_index, binding as u8, combo, commit)?;
+            self.set_keymatrix_config(0, key_index, binding as u8, slot, commit)?;
         }
         Ok(())
     }
@@ -1584,35 +1586,25 @@ impl KeyboardInterface {
         }
     }
 
-    /// Set a key's 4-byte config on any layer.
+    /// Write a key's 4-byte config to the Fn layer (SET_FN, 0x10).
     ///
-    /// Routes to SET_KEYMATRIX (0x0A) for layers 0-1 or SET_FN (0x10) for layer 2+.
-    /// The `config` bytes are `[config_type, b1, b2, b3]` as used by the protocol.
-    pub fn set_key_config(
+    /// The Fn layer is a separate store from the keymatrix; an all-zero entry there
+    /// is transparent fall-through rather than silence.
+    pub fn set_fn_config(
         &self,
         profile: u8,
         key_index: u8,
-        layer: u8,
         config: [u8; 4],
     ) -> Result<(), KeyboardError> {
-        let enabled = config != [0, 0, 0, 0];
-        if layer <= 1 {
-            let pkt = SetKeyMatrixData::new(profile, key_index, layer, enabled, config)?;
-            self.transport.send_command(
-                self.commands.set_keymatrix,
-                &pkt.to_data(),
-                ChecksumType::Bit7,
-            )?;
-        } else {
-            self.transport
-                .send(&SetFnData::new(0, profile, key_index, config)?)?;
-        }
+        self.transport
+            .send(&SetFnData::new(0, profile, key_index, config)?)?;
         Ok(())
     }
 
     /// Set a single key's mapping (base layer only).
     ///
-    /// For layer-aware remapping, use [`set_key_config`](Self::set_key_config).
+    /// For layer-aware remapping, use [`set_keymatrix_config`](Self::set_keymatrix_config)
+    /// or [`set_fn_config`](Self::set_fn_config).
     pub fn set_keymatrix(
         &self,
         profile: u8,
@@ -1630,11 +1622,20 @@ impl KeyboardInterface {
         Ok(())
     }
 
-    /// Reset a key to its default mapping on any layer.
+    /// Clear a key's entry on an *overlay* layer, where an all-zero config means
+    /// transparent fall-through to the base layer.
     ///
-    /// Sets the key to "disabled" which causes the firmware to use the default.
+    /// Not valid for keymatrix layer 0: the base layer has no ROM fallback, so an
+    /// all-zero entry there silences the key. Reset it by writing the position's
+    /// factory keycode instead.
     pub fn reset_key(&self, layer: u8, key_index: u8) -> Result<(), KeyboardError> {
-        self.set_key_config(0, key_index, layer, [0, 0, 0, 0])
+        match layer {
+            0 => Err(KeyboardError::InvalidParameter(
+                "base layer has no ROM fallback; write the factory keycode instead".into(),
+            )),
+            FN_WIRE_LAYER => self.set_fn_config(0, key_index, [0, 0, 0, 0]),
+            l => self.set_keymatrix_config(0, key_index, l, [0, 0, 0, 0], true),
+        }
     }
 
     /// Swap two keys
@@ -1823,7 +1824,12 @@ impl KeyboardInterface {
         macro_index: u8,
         macro_type: u8,
     ) -> Result<(), KeyboardError> {
-        self.set_key_config(0, key_index, layer, [9, macro_type, macro_index, 0])
+        let config = [9, macro_type, macro_index, 0];
+        if layer == FN_WIRE_LAYER {
+            self.set_fn_config(0, key_index, config)
+        } else {
+            self.set_keymatrix_config(0, key_index, layer, config, true)
+        }
     }
 
     /// Remove macro assignment from a key, restoring default behavior.
@@ -2193,4 +2199,26 @@ pub fn parse_macro_events(data: &[u8]) -> (u16, Vec<MacroEvent>) {
     }
 
     (repeat_count, events)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_slot0;
+
+    /// DKS slot 0 doubles as keymatrix layer 0, which has no ROM fallback. Leaving it
+    /// empty must preserve whatever the key emits today rather than silencing it —
+    /// including non-key actions such as a bound macro, which the old
+    /// `DksCombo::from_config_bytes(..).unwrap_or_default()` read silently discarded.
+    #[test]
+    fn dks_slot0_preserves_current_output_when_left_empty() {
+        assert_eq!(resolve_slot0([0; 4], [9, 0, 3, 0]), [9, 0, 3, 0]);
+        assert_eq!(resolve_slot0([0; 4], [0, 0, 0x06, 0]), [0, 0, 0x06, 0]);
+        // An explicit request always wins.
+        assert_eq!(
+            resolve_slot0([0, 0xE0, 0x06, 0], [0, 0, 0x04, 0]),
+            [0, 0xE0, 0x06, 0]
+        );
+        // Nothing to preserve.
+        assert_eq!(resolve_slot0([0; 4], [0; 4]), [0; 4]);
+    }
 }
