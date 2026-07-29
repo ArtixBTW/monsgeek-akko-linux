@@ -2,6 +2,7 @@
 // Real-time monitoring and settings configuration
 
 mod help;
+mod keys;
 mod shared;
 mod tabs;
 mod widgets;
@@ -12,10 +13,6 @@ use shared::*;
 use tabs::audio::AudioTabState;
 use tabs::depth::{get_key_label, render_depth_monitor};
 use tabs::device_info::{render_device_info, HexColorTarget, InfoTag};
-
-use tabs::remaps::{
-    text_preview_from_events, BindingEditor, BindingField, BindingType, RemapFocus, RemapLayerView,
-};
 
 use tabs::key_mapping::{KeyMappingFilter, KeyMappingView, KmSort};
 use tabs::triggers::{render_trigger_edit_modal, TriggerEditModal};
@@ -47,11 +44,9 @@ use tui_scrollview::ScrollViewState;
 // Use shared library
 use crate::firmware_api::FirmwareCheckResult;
 use crate::hid::BatteryInfo;
-use crate::key_action::KeyAction;
-use crate::keymap::{self, KeyEntry, KeyRow, Layer};
+use crate::keymap::{self, KeyRow};
 use crate::power_supply::find_hid_battery_power_supply;
 use crate::{cmd, devices, FirmwareSettings, TriggerSettings};
-use monsgeek_transport::protocol::matrix;
 
 // Keyboard abstraction layer - using async interface directly
 use monsgeek_keyboard::{
@@ -122,11 +117,6 @@ struct App {
     // Sleep time settings (loaded separately, merged into options)
     sleep_settings: Option<SleepTimeSettings>,
     // Remap tab state (tab 5)
-    remaps: Vec<KeyEntry>,
-    remap_selected: usize,
-    remap_layer_view: RemapLayerView,
-    binding_editor: BindingEditor,
-    remap_focus: RemapFocus,
     // Key Mapping tab state (unified per-key view)
     key_rows: Vec<KeyRow>,
     key_mapping_selected: usize,
@@ -136,7 +126,6 @@ struct App {
     key_mapping_filter_open: bool,
     key_mapping_filter_field: usize,
     // Macro data (loaded alongside remaps or on editor open)
-    macros: Vec<MacroSlot>,
     // Key depth visualization
     depth_view_mode: DepthViewMode,
     depth_history: Vec<VecDeque<(f64, f32)>>, // Per-key history (timestamp, depth_mm)
@@ -241,11 +230,6 @@ impl App {
             precision: Precision::default(),
             options: None,
             sleep_settings: None,
-            remaps: Vec::new(),
-            remap_selected: 0,
-            remap_layer_view: RemapLayerView::default(),
-            binding_editor: BindingEditor::new(),
-            remap_focus: RemapFocus::default(),
             key_rows: Vec::new(),
             key_mapping_selected: 0,
             key_mapping_view: KeyMappingView::default(),
@@ -253,7 +237,6 @@ impl App {
             key_mapping_filter: KeyMappingFilter::default(),
             key_mapping_filter_open: false,
             key_mapping_filter_field: 0,
-            macros: Vec::new(),
             // Key depth visualization
             depth_view_mode: DepthViewMode::default(),
             depth_history: Vec::new(),
@@ -671,7 +654,6 @@ impl App {
                 self.loading = LoadingStates::default();
                 self.info = FirmwareSettings::default();
                 self.triggers = None;
-                self.remaps.clear();
                 self.patch_info = None;
                 self.dongle_patch_info = None;
                 self.firmware_check = None;
@@ -686,28 +668,6 @@ impl App {
             }
         }
     }
-    /// Load remaps (tab 5) from device — reads key matrix for both layers
-    fn load_remaps(&mut self) {
-        let Some(keyboard) = self.keyboard.clone() else {
-            return;
-        };
-
-        self.loading.remaps = LoadState::Loading;
-        let tx = self.gen_sender();
-        tokio::spawn(async move {
-            match keymap::load_async(&keyboard) {
-                Ok(km) => {
-                    // Collect only remapped entries (matching old behavior)
-                    let remaps: Vec<KeyEntry> = km.remaps().cloned().collect();
-                    tx.send(AsyncResult::Remaps(Ok(remaps)));
-                }
-                Err(e) => {
-                    tx.send(AsyncResult::Remaps(Err(e.to_string())));
-                }
-            }
-        });
-    }
-
     /// Load the unified per-key rows for the Key Mapping tab.
     fn load_key_mapping(&mut self) {
         let Some(keyboard) = self.keyboard.clone() else {
@@ -720,103 +680,6 @@ impl App {
                 Ok(rows) => tx.send(AsyncResult::KeyRows(Ok(rows))),
                 Err(e) => tx.send(AsyncResult::KeyRows(Err(e.to_string()))),
             }
-        });
-    }
-
-    /// Get remaps filtered by current layer view.
-    fn filtered_remaps(&self) -> Vec<usize> {
-        self.remaps
-            .iter()
-            .enumerate()
-            .filter(|(_, r)| self.remap_layer_view.matches(r.layer))
-            .map(|(i, _)| i)
-            .collect()
-    }
-
-    /// Apply a remap action to a key
-    fn apply_remap(&mut self, key_index: u8, layer: Layer, action: &KeyAction) {
-        let Some(keyboard) = self.keyboard.clone() else {
-            self.status_msg = "No keyboard connected".to_string();
-            return;
-        };
-
-        let tx = self.gen_sender();
-        let action = *action;
-        let position = matrix::key_name(key_index);
-        self.status_msg = format!("Remapping {position}...");
-
-        tokio::spawn(async move {
-            let result = keymap::set_key_async(&keyboard, key_index, layer, &action);
-            tx.send(AsyncResult::SetComplete(
-                "Remap".to_string(),
-                result.map_err(|e: monsgeek_keyboard::KeyboardError| e.to_string()),
-            ));
-        });
-    }
-
-    /// Save macro events directly to a slot.
-    fn set_macro_from_events(&mut self, index: u8, events: &[(u8, bool, u16)], repeat: u16) {
-        let Some(keyboard) = self.keyboard.clone() else {
-            self.status_msg = "No keyboard connected".to_string();
-            return;
-        };
-
-        let events = events.to_vec();
-        let tx = self.gen_sender();
-        self.status_msg = format!("Setting macro {index}...");
-        tokio::spawn(async move {
-            let result = keyboard
-                .set_macro(index, &events, repeat)
-                .map_err(|e| e.to_string());
-            tx.send(AsyncResult::SetComplete("Macro".to_string(), result));
-        });
-    }
-
-    /// Sync the binding editor to the currently selected remap entry.
-    fn sync_binding_editor(&mut self) {
-        let filtered = self.filtered_remaps();
-        if let Some(&remap_idx) = filtered.get(self.remap_selected) {
-            let action = self.remaps[remap_idx].action;
-            self.binding_editor = BindingEditor::from_action(&action, &self.macros);
-        } else {
-            self.binding_editor = BindingEditor::new();
-        }
-    }
-
-    /// Load macros from device
-    fn load_macros(&mut self) {
-        let Some(keyboard) = self.keyboard.clone() else {
-            return;
-        };
-
-        self.loading.macros = LoadState::Loading;
-        let tx = self.gen_sender();
-        tokio::spawn(async move {
-            let mut slots = Vec::new();
-            for i in 0..8u8 {
-                let slot = match keyboard.get_macro(i) {
-                    Ok(data) => {
-                        let (repeat_count, events) = monsgeek_keyboard::parse_macro_events(&data);
-                        let tui_events: Vec<MacroEvent> = events
-                            .iter()
-                            .map(|e| MacroEvent {
-                                keycode: e.keycode,
-                                is_down: e.is_down,
-                                delay_ms: e.delay_ms,
-                            })
-                            .collect();
-                        let text_preview = text_preview_from_events(&events);
-                        MacroSlot {
-                            events: tui_events,
-                            repeat_count,
-                            text_preview,
-                        }
-                    }
-                    Err(_) => MacroSlot::default(),
-                };
-                slots.push(slot);
-            }
-            tx.send(AsyncResult::Macros(Ok(slots)));
         });
     }
 
@@ -960,16 +823,6 @@ impl App {
                 self.loading.options = LoadState::Error;
                 self.status_msg = "Failed to load options".to_string();
             }
-            AsyncResult::Remaps(Ok(remaps)) => {
-                self.remaps = remaps;
-                self.loading.remaps = LoadState::Loaded;
-                self.status_msg = format!("{} remapped keys found", self.remaps.len());
-                self.sync_binding_editor();
-            }
-            AsyncResult::Remaps(Err(e)) => {
-                self.loading.remaps = LoadState::Error;
-                self.status_msg = format!("Failed to load remaps: {e}");
-            }
             AsyncResult::KeyRows(Ok(rows)) => {
                 self.key_rows = rows;
                 self.loading.key_mapping = LoadState::Loaded;
@@ -982,26 +835,8 @@ impl App {
                 self.loading.key_mapping = LoadState::Error;
                 self.status_msg = format!("Failed to load key mapping: {e}");
             }
-            AsyncResult::Macros(Ok(macros)) => {
-                self.macros = macros;
-                self.loading.macros = LoadState::Loaded;
-                self.status_msg = format!("Loaded {} macro slots", self.macros.len());
-                self.sync_binding_editor();
-            }
-            AsyncResult::Macros(Err(_)) => {
-                self.loading.macros = LoadState::Error;
-                self.status_msg = "Failed to load macros".to_string();
-            }
             AsyncResult::SetComplete(field, Ok(())) => {
                 self.status_msg = format!("{field} updated");
-                // Reload remaps after remap operations
-                if field.starts_with("Remap") && self.loading.remaps != LoadState::Loading {
-                    self.load_remaps();
-                }
-                // Reload macros after macro operations
-                if field.starts_with("Macro") && self.loading.macros != LoadState::Loading {
-                    self.load_macros();
-                }
             }
             AsyncResult::SetComplete(field, Err(e)) => {
                 self.status_msg = format!("Failed to set {field}: {e}");
@@ -1165,106 +1000,6 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
             maybe_event = event_stream.next() => {
                 if let Some(Ok(Event::Key(key))) = maybe_event {
                     if key.kind != KeyEventKind::Press {
-                        continue;
-                    }
-
-                    // Handle binding editor focus (replaces old macro modal + remap editor)
-                    if app.tab == 2 && app.remap_focus == RemapFocus::Editor {
-                        match key.code {
-                            KeyCode::Esc => {
-                                app.remap_focus = RemapFocus::List;
-                                app.status_msg = String::new();
-                            }
-                            KeyCode::Enter => {
-                                // Extract everything we need from editor before calling app methods
-                                let action = app.binding_editor.to_action();
-                                let is_macro = app.binding_editor.binding_type == BindingType::Macro;
-                                let macro_events = app.binding_editor.macro_events_to_tuples();
-                                let macro_repeat = app.binding_editor.macro_repeat;
-                                let macro_slot = app.binding_editor.macro_slot;
-
-                                let filtered = app.filtered_remaps();
-                                if let Some(&remap_idx) = filtered.get(app.remap_selected) {
-                                    let key_index = app.remaps[remap_idx].index;
-                                    let layer = app.remaps[remap_idx].layer;
-                                    if is_macro {
-                                        app.set_macro_from_events(macro_slot, &macro_events, macro_repeat);
-                                    }
-                                    app.apply_remap(key_index, layer, &action);
-                                    app.remap_focus = RemapFocus::List;
-                                }
-                            }
-                            KeyCode::Tab | KeyCode::Down => {
-                                let ed = &mut app.binding_editor;
-                                let f = ed.field;
-                                if key.code == KeyCode::Down
-                                    && matches!(f, BindingField::KeyList | BindingField::MacroEvents)
-                                {
-                                    ed.scroll_down();
-                                } else if key.code == KeyCode::Tab && f == BindingField::MacroEvents {
-                                    ed.cycle_macro_event_field();
-                                } else {
-                                    ed.next_field();
-                                }
-                            }
-                            KeyCode::BackTab | KeyCode::Up => {
-                                let ed = &mut app.binding_editor;
-                                let f = ed.field;
-                                if key.code == KeyCode::Up
-                                    && matches!(f, BindingField::KeyList | BindingField::MacroEvents)
-                                {
-                                    ed.scroll_up();
-                                } else if key.code == KeyCode::BackTab && f == BindingField::MacroEvents {
-                                    ed.next_field();
-                                } else {
-                                    ed.prev_field();
-                                }
-                            }
-                            KeyCode::Left => {
-                                let ed = &mut app.binding_editor;
-                                if ed.field == BindingField::Type && ed.binding_type == BindingType::Disabled {
-                                    app.remap_focus = RemapFocus::List;
-                                } else {
-                                    ed.adjust_left();
-                                }
-                            }
-                            KeyCode::Right => {
-                                app.binding_editor.adjust_right();
-                            }
-                            KeyCode::Char(' ') => {
-                                let ed = &mut app.binding_editor;
-                                if ed.field == BindingField::Mods {
-                                    ed.toggle_current_mod();
-                                } else if ed.field == BindingField::MacroEvents {
-                                    if let Some(evt) = ed.macro_events.get_mut(ed.macro_event_cursor) {
-                                        evt.is_down = !evt.is_down;
-                                        ed.dirty = true;
-                                    }
-                                } else if ed.field == BindingField::KeyList {
-                                    ed.dirty = true;
-                                }
-                            }
-                            KeyCode::Char('a')
-                                if app.binding_editor.field == BindingField::MacroEvents =>
-                            {
-                                app.binding_editor.add_macro_event();
-                            }
-                            KeyCode::Char('x') | KeyCode::Char('d')
-                                if app.binding_editor.field == BindingField::MacroEvents =>
-                            {
-                                app.binding_editor.remove_macro_event();
-                            }
-                            KeyCode::Backspace => {
-                                app.binding_editor.handle_backspace();
-                            }
-                            KeyCode::Char(c) => {
-                                let ed = &mut app.binding_editor;
-                                if matches!(ed.field, BindingField::Filter | BindingField::MacroText) {
-                                    ed.handle_char(c);
-                                }
-                            }
-                            _ => {}
-                        }
                         continue;
                     }
 
@@ -1939,21 +1674,9 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                         if content.contains(pos) {
                             // Row within content area (accounting for any border)
                             let content_row = (mouse.row.saturating_sub(content.y + 1)) as usize;
-                            match app.tab {
-                                0 => {
-                                    // Device Info - items in the list
-                                    if content_row < app.info_tags.len() {
-                                        app.selected = content_row;
-                                    }
-                                }
-                                3 => {
-                                    // Remaps tab - select remap entry
-                                    let filtered = app.filtered_remaps();
-                                    if content_row < filtered.len() {
-                                        app.remap_selected = content_row;
-                                    }
-                                }
-                                _ => {}
+                            // Device Info — items in the list
+                            if app.tab == 0 && content_row < app.info_tags.len() {
+                                app.selected = content_row;
                             }
                         }
                     }

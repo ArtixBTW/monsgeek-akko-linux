@@ -43,7 +43,7 @@ pub fn remap(keyboard: &KeyboardInterface, from: &str, to: &str, layer: u8) -> C
         key_ref.index,
         effective_layer.name()
     );
-    match keymap::set_key_sync(keyboard, key_ref.index, effective_layer, &action) {
+    match keymap::set_key(keyboard, key_ref.index, effective_layer, &action) {
         Ok(()) => println!("{display_ref} remapped to {action}"),
         Err(e) => eprintln!("Failed to remap key: {e}"),
     }
@@ -75,7 +75,7 @@ pub fn reset_key(keyboard: &KeyboardInterface, key: &str, layer: u8) -> CommandR
         key_ref.index,
         effective_layer.name()
     );
-    match keymap::reset_key_sync(keyboard, key_ref.index, effective_layer) {
+    match keymap::reset_key(keyboard, key_ref.index, effective_layer) {
         Ok(()) => println!("{display_ref} reset to default"),
         Err(e) => eprintln!("Failed to reset key: {e}"),
     }
@@ -136,7 +136,7 @@ pub fn remap_list(
     layer_filter: Option<u8>,
     show_all: bool,
 ) -> CommandResult {
-    let keymap = match keymap::load_sync(keyboard) {
+    let keymap = match keymap::load(keyboard) {
         Ok(km) => km,
         Err(e) => {
             eprintln!("Failed to read key matrix: {e}");

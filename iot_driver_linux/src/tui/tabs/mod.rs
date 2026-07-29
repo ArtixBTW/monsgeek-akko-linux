@@ -6,7 +6,6 @@ pub(super) mod device_info;
 pub(super) mod key_mapping;
 #[cfg(feature = "notify")]
 pub(super) mod notify;
-pub(super) mod remaps;
 pub(super) mod screen;
 pub(super) mod triggers;
 

@@ -6,7 +6,6 @@ use ratatui::{prelude::*, widgets::*};
 use std::collections::VecDeque;
 
 use crate::key_action::KeyAction;
-use crate::keymap::Layer;
 use crate::protocol::hid;
 use crate::tui::widgets::PopupSelect;
 use crate::TriggerSettings;
@@ -15,10 +14,10 @@ use monsgeek_keyboard::{
     Precision,
 };
 
+use super::super::keys::{all_hid_keys, CONSUMER_KEYS};
 use super::super::shared::{AsyncResult, LoadState, SpinnerConfig};
 use super::super::App;
 use super::depth::get_key_label;
-use super::remaps::{all_hid_keys, CONSUMER_KEYS};
 
 // ============================================================================
 // Types
@@ -764,19 +763,20 @@ impl App {
             .collect()
     }
 
-    /// Default/base-layer HID code a matrix key would emit (remap-aware).
+    /// Base-layer HID code a matrix key currently emits, falling back to the
+    /// factory keycode for its position when the key has no plain-key output.
     pub(in crate::tui) fn key_output_hid(&self, key_index: u8) -> u8 {
-        for entry in &self.remaps {
-            if entry.index == key_index && entry.layer == Layer::Base {
-                return match entry.action {
-                    KeyAction::Key(code) => code,
-                    KeyAction::Combo { key, .. } => key,
-                    _ => continue,
-                };
-            }
+        let current = self
+            .key_rows
+            .iter()
+            .find(|r| r.index == key_index)
+            .map(|r| r.outputs[0]);
+        match current {
+            Some(KeyAction::Key(code)) => code,
+            Some(KeyAction::Combo { key, .. }) => key,
+            _ => hid::key_code_from_name(monsgeek_transport::protocol::matrix::key_name(key_index))
+                .unwrap_or(0),
         }
-        hid::key_code_from_name(monsgeek_transport::protocol::matrix::key_name(key_index))
-            .unwrap_or(0)
     }
 
     /// Best-effort reverse lookup: which matrix key emits the combo's primary HID.

@@ -8,7 +8,7 @@
 use ratatui::{prelude::*, widgets::*};
 
 use crate::keymap::KeyRow;
-use crate::tui::RemapLayerView;
+use crate::tui::keys::RemapLayerView;
 use monsgeek_keyboard::{KeyMode, ModeByte};
 use monsgeek_transport::protocol::matrix;
 

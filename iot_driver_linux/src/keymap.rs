@@ -1,8 +1,8 @@
 //! Unified keymap abstraction for CLI and TUI.
 //!
-//! Provides shared types (`KeyEntry`, `KeyMap`) and I/O helpers
-//! (`load_sync`/`load_async`, `set_key_sync`/`set_key_async`) so that both the CLI
-//! and TUI share identical parsing, filtering, and writing logic.
+//! Provides shared types (`KeyEntry`, `KeyMap`) and I/O helpers (`load`, `set_key`,
+//! `reset_key`) so that both the CLI and TUI share identical parsing, filtering,
+//! and writing logic.
 //!
 //! `Layer` and `KeyRef` live in `monsgeek_transport::protocol` and are re-exported here.
 
@@ -212,23 +212,8 @@ pub fn is_user_remap(k: &[u8], default_hid_code: u8) -> bool {
 /// Number of pages to read for a full key matrix (126 positions × 4 bytes = 504).
 const KEYMATRIX_PAGES: usize = 8;
 
-/// Load from KeyboardInterface (CLI).
-pub fn load_sync(keyboard: &KeyboardInterface) -> Result<KeyMap, KeyboardError> {
-    let key_count = keyboard.key_count() as usize;
-    let base0 = keyboard.get_keymatrix(0, KEYMATRIX_PAGES)?;
-    let base1 = keyboard.get_keymatrix(1, KEYMATRIX_PAGES)?;
-    let fn_layer = keyboard.get_fn_keymatrix(0, 0, KEYMATRIX_PAGES).ok();
-
-    Ok(KeyMap::from_raw(&RawKeyMapData {
-        base0,
-        base1,
-        fn_layer,
-        key_count,
-    }))
-}
-
-/// Load from KeyboardInterface (TUI async).
-pub fn load_async(keyboard: &KeyboardInterface) -> Result<KeyMap, KeyboardError> {
+/// Load the keymap from a connected keyboard.
+pub fn load(keyboard: &KeyboardInterface) -> Result<KeyMap, KeyboardError> {
     let key_count = keyboard.key_count() as usize;
     let base0 = keyboard.get_keymatrix(0, KEYMATRIX_PAGES)?;
     let base1 = keyboard.get_keymatrix(1, KEYMATRIX_PAGES)?;
@@ -246,18 +231,8 @@ pub fn load_async(keyboard: &KeyboardInterface) -> Result<KeyMap, KeyboardError>
 // I/O: writing
 // ---------------------------------------------------------------------------
 
-/// Write a key config via KeyboardInterface (CLI).
-pub fn set_key_sync(
-    kb: &KeyboardInterface,
-    index: u8,
-    layer: Layer,
-    action: &KeyAction,
-) -> Result<(), KeyboardError> {
-    kb.set_key_config(0, index, layer.wire_layer(), action.to_config_bytes())
-}
-
-/// Write a key config via KeyboardInterface (TUI async).
-pub fn set_key_async(
+/// Write a key config via KeyboardInterface.
+pub fn set_key(
     kb: &KeyboardInterface,
     index: u8,
     layer: Layer,
@@ -278,29 +253,11 @@ pub fn default_keycode(index: u8) -> u8 {
 /// reset by writing the position's factory-default keycode, not zeros. The overlay
 /// layers (Layer1 / Fn) treat a zero entry as a transparent fall-through to the
 /// base, so zeros are the correct "default" there.
-fn reset_key_impl(kb: &KeyboardInterface, index: u8, layer: Layer) -> Result<(), KeyboardError> {
+pub fn reset_key(kb: &KeyboardInterface, index: u8, layer: Layer) -> Result<(), KeyboardError> {
     match layer {
         Layer::Base => kb.set_keymatrix(0, index, default_keycode(index), true, 0),
         Layer::Layer1 | Layer::Fn => kb.reset_key(layer.wire_layer(), index),
     }
-}
-
-/// Reset a key to default via KeyboardInterface (CLI).
-pub fn reset_key_sync(
-    kb: &KeyboardInterface,
-    index: u8,
-    layer: Layer,
-) -> Result<(), KeyboardError> {
-    reset_key_impl(kb, index, layer)
-}
-
-/// Reset a key to default via KeyboardInterface (TUI async).
-pub fn reset_key_async(
-    kb: &KeyboardInterface,
-    index: u8,
-    layer: Layer,
-) -> Result<(), KeyboardError> {
-    reset_key_impl(kb, index, layer)
 }
 
 // ---------------------------------------------------------------------------

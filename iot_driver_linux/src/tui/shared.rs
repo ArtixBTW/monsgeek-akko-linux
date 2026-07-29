@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use crate::device_loader::PollingRateSupport;
 use crate::firmware_api::FirmwareCheckResult;
 use crate::hid::BatteryInfo;
-use crate::keymap::{KeyEntry, KeyRow};
+use crate::keymap::KeyRow;
 use crate::TriggerSettings;
 use monsgeek_keyboard::{KeyboardOptions as KbOptions, LedParams, Precision, SleepTimeSettings};
 use monsgeek_transport::TransportType;
@@ -264,25 +264,7 @@ pub(crate) struct LoadingStates {
     // Other tabs
     pub triggers: LoadState,    // tab 3
     pub options: LoadState,     // tab 4
-    pub remaps: LoadState,      // tab 5 (remap list)
     pub key_mapping: LoadState, // unified Key Mapping tab
-    pub macros: LoadState,      // macro slots (loaded from remap tab)
-}
-
-/// Macro slot data
-#[derive(Debug, Clone, Default)]
-pub(crate) struct MacroSlot {
-    pub events: Vec<MacroEvent>,
-    pub repeat_count: u16,
-    pub text_preview: String,
-}
-
-/// Single macro event
-#[derive(Debug, Clone)]
-pub(crate) struct MacroEvent {
-    pub keycode: u8,
-    pub is_down: bool,
-    pub delay_ms: u16,
 }
 
 /// Async result from background keyboard operations
@@ -305,9 +287,7 @@ pub(crate) enum AsyncResult {
     // Other tab results
     Triggers(Result<TriggerSettings, String>),
     Options(Result<KbOptions, String>),
-    Remaps(Result<Vec<KeyEntry>, String>),
     KeyRows(Result<Vec<KeyRow>, String>),
-    Macros(Result<Vec<MacroSlot>, String>),
     // Battery status (from keyboard API)
     Battery(Result<BatteryInfo, String>),
     // Operation completion (for set operations)
