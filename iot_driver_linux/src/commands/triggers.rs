@@ -685,14 +685,6 @@ pub fn set_modtap_time(keyboard: &KeyboardInterface, key: u8, ms: u16) -> Comman
     Ok(())
 }
 
-fn key_action_hid_code(action: KeyAction) -> Option<u8> {
-    match action {
-        KeyAction::Key(code) => Some(code),
-        KeyAction::Combo { key, .. } => Some(key),
-        _ => None,
-    }
-}
-
 fn parse_dks_combo(spec: &str) -> Result<DksCombo, String> {
     let mut codes = [0u8; 3];
     for (i, part) in spec
@@ -705,7 +697,8 @@ fn parse_dks_combo(spec: &str) -> Result<DksCombo, String> {
         let action: KeyAction = part
             .parse()
             .map_err(|e| format!("slot key '{part}': {e}"))?;
-        codes[i] = key_action_hid_code(action)
+        codes[i] = action
+            .primary_usage()
             .ok_or_else(|| format!("slot key '{part}': need a keyboard key"))?;
     }
     Ok(DksCombo::new(codes[0], codes[1], codes[2]))

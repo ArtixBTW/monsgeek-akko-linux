@@ -771,12 +771,10 @@ impl App {
             .iter()
             .find(|r| r.index == key_index)
             .map(|r| r.outputs[0]);
-        match current {
-            Some(KeyAction::Key(code)) => code,
-            Some(KeyAction::Combo { key, .. }) => key,
-            _ => hid::key_code_from_name(monsgeek_transport::protocol::matrix::key_name(key_index))
-                .unwrap_or(0),
-        }
+        current.and_then(|a| a.primary_usage()).unwrap_or_else(|| {
+            hid::key_code_from_name(monsgeek_transport::protocol::matrix::key_name(key_index))
+                .unwrap_or(0)
+        })
     }
 
     /// Best-effort reverse lookup: which matrix key emits the combo's primary HID.

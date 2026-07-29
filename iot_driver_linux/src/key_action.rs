@@ -10,8 +10,8 @@
 //! Escape       → Key(0x29)
 //! Esc          → Key(0x29)       (alias)
 //! 0x04         → Key(0x04)       (hex literal)
-//! Ctrl+C       → Combo(LCtrl+C)
-//! Shift+Alt+F3 → Combo(LShift+LAlt+F3)
+//! Ctrl+C       → Combo([LCtrl, C])
+//! Shift+Alt+F3 → Combo([LShift, LAlt, F3])   (three usage slots max)
 //! Mouse1       → Mouse(1)
 //! Macro(0)     → Macro(index=0, repeat)
 //! Macro(2,hold)→ Macro(index=2, hold-to-repeat)
@@ -24,32 +24,8 @@ use crate::protocol::hid;
 use std::fmt;
 use std::str::FromStr;
 
-/// HID modifier bitmask constants (USB HID Report Descriptor modifier byte).
-///
-/// These match the bit positions in the first byte of a standard HID keyboard
-/// report, where each bit corresponds to a modifier key (usage 0xE0-0xE7).
-pub mod mods {
-    pub const LCTRL: u8 = 0x01;
-    pub const LSHIFT: u8 = 0x02;
-    pub const LALT: u8 = 0x04;
-    pub const LGUI: u8 = 0x08;
-    pub const RCTRL: u8 = 0x10;
-    pub const RSHIFT: u8 = 0x20;
-    pub const RALT: u8 = 0x40;
-    pub const RGUI: u8 = 0x80;
-
-    /// Modifier bitmask → display name mapping, shared by Display impls.
-    pub const DISPLAY_NAMES: &[(u8, &str)] = &[
-        (LCTRL, "Ctrl"),
-        (LSHIFT, "Shift"),
-        (LALT, "Alt"),
-        (LGUI, "GUI"),
-        (RCTRL, "RCtrl"),
-        (RSHIFT, "RShift"),
-        (RALT, "RAlt"),
-        (RGUI, "RGUI"),
-    ];
-}
+/// Usage slots in one keymatrix entry: bytes 1..=3, all pressed together.
+pub const CHORD_SLOTS: usize = 3;
 
 /// Protocol config_type constants for the 4-byte key config.
 mod config_type {
@@ -118,12 +94,19 @@ mod special_fn {
 pub enum KeyAction {
     /// Disabled / no action (config_type=0, keycode=0).
     Disabled,
-    /// Single HID keycode, no modifiers (config_type=0).
+    /// Single HID keycode (config_type=0).
     Key(u8),
-    /// Modifier + key combo (config_type=0, modifier bitmask in b1).
+    /// A chord of 2–3 HID usages pressed together (config_type=0).
     ///
-    /// `mods` uses HID modifier bits from the [`mods`] module.
-    Combo { mods: u8, key: u8 },
+    /// A keymatrix slot holds **three independent usage codes** in `b1`/`b2`/`b3`,
+    /// all pressed on key-down (firmware `keycode_dispatch` case 0 calls
+    /// `hid_key_press` on each). Modifiers are ordinary usages `0xE0..=0xE7`, not a
+    /// bitmask — `hid_key_press` turns those into report modifier bits itself.
+    /// So Ctrl+C is `[0xE0, 0x06, 0]`, matching the vendor's `configToMatrix`
+    /// `[0, skey, key, key2]`.
+    ///
+    /// Trailing unused slots are zero; use [`KeyAction::chord`] to build one.
+    Combo { keys: [u8; 3] },
     /// Mouse button (config_type=1).
     Mouse(u8),
     /// Macro assignment (config_type=9).
@@ -157,13 +140,32 @@ pub enum KeyAction {
     Unknown { config_type: u8, data: [u8; 3] },
 }
 
+/// Whether a keymatrix usage slot actually produces a keypress.
+///
+/// Firmware `hid_key_press` (v407 @ 0x080078f4) accepts `0xE0..=0xE7` as modifier
+/// usages and returns early for anything below `0x04`, so `0x00..=0x03` are no-ops.
+/// Slots holding those are dropped on decode: an older release of this driver wrote
+/// a modifier *bitmask* into `b1`, and e.g. `[0, 0x01, 0x06, 0]` really does emit a
+/// bare "C" on the device. Decoding it as `Key(C)` reports what the key does, and
+/// the stale byte is rewritten canonically the next time the key is edited.
+fn usage_is_live(usage: u8) -> bool {
+    usage >= 0x04
+}
+
+/// HID usages `0xE0..=0xE7`, which `hid_key_press` folds into the report's
+/// modifier byte instead of a key slot.
+fn is_modifier_usage(usage: u8) -> bool {
+    (0xE0..=0xE7).contains(&usage)
+}
+
 impl KeyAction {
     /// Encode to the 4-byte config format used in GET/SET_KEYMATRIX.
     pub fn to_config_bytes(self) -> [u8; 4] {
         match self {
             KeyAction::Disabled => [0, 0, 0, 0],
+            // A lone usage goes in b2, matching the vendor's `hidToMatrix`.
             KeyAction::Key(code) => [0, 0, code, 0],
-            KeyAction::Combo { mods, key } => [0, mods, key, 0],
+            KeyAction::Combo { keys } => [0, keys[0], keys[1], keys[2]],
             KeyAction::Mouse(btn) => [config_type::MOUSE, 0, btn, 0],
             KeyAction::Consumer(code) => [config_type::CONSUMER, 0, code as u8, (code >> 8) as u8],
             KeyAction::Macro { index, kind } => [config_type::MACRO, kind, index, 0],
@@ -180,31 +182,38 @@ impl KeyAction {
         }
     }
 
+    /// Build the canonical action for a set of HID usages pressed together,
+    /// ignoring zeros and firmware no-ops. Extra usages beyond three are dropped —
+    /// the wire format has exactly three slots.
+    pub fn chord(usages: impl IntoIterator<Item = u8>) -> Self {
+        let mut keys = [0u8; 3];
+        let mut n = 0;
+        for u in usages {
+            if !usage_is_live(u) || n == keys.len() {
+                continue;
+            }
+            keys[n] = u;
+            n += 1;
+        }
+        match n {
+            0 => KeyAction::Disabled,
+            1 => KeyAction::Key(keys[0]),
+            _ => KeyAction::Combo { keys },
+        }
+    }
+
     /// Decode from the 4-byte config format returned by GET_KEYMATRIX.
     ///
-    /// The firmware uses two key-code positions:
-    /// - Default/factory keys: `[0, 0, keycode, 0]` — code at byte 2.
-    /// - User remaps:          `[0, keycode, 0, 0]` — code at byte 1 (byte 2 = 0).
-    /// - Modifier combos:      `[0, mod_mask, keycode, 0]` — both bytes non-zero.
+    /// For `config_type == 0` the firmware presses `b2`, `b1`, `b3` as three
+    /// independent HID usages, so decoding just collects the live ones and
+    /// normalises: none → `Disabled`, one → `Key`, two or three → `Combo`.
+    /// A lone usage therefore re-encodes into `b2` regardless of which slot it
+    /// came from; the firmware presses every slot identically, so that is a
+    /// behaviour-preserving normalisation.
     pub fn from_config_bytes(bytes: [u8; 4]) -> Self {
         match bytes[0] {
-            config_type::KEY => {
-                if bytes[1] == 0 && bytes[2] == 0 {
-                    KeyAction::Disabled
-                } else if bytes[1] != 0 && bytes[2] != 0 {
-                    // Both non-zero: modifier combo
-                    KeyAction::Combo {
-                        mods: bytes[1],
-                        key: bytes[2],
-                    }
-                } else if bytes[2] != 0 {
-                    // Default/factory format: keycode at byte 2
-                    KeyAction::Key(bytes[2])
-                } else {
-                    // User remap format: keycode at byte 1
-                    KeyAction::Key(bytes[1])
-                }
-            }
+            // Slot order b1, b2, b3 mirrors the vendor's [0, skey, key, key2].
+            config_type::KEY => KeyAction::chord([bytes[1], bytes[2], bytes[3]]),
             config_type::MOUSE => KeyAction::Mouse(bytes[2]),
             config_type::CONSUMER => {
                 let code = bytes[2] as u16 | (bytes[3] as u16) << 8;
@@ -243,12 +252,19 @@ impl KeyAction {
         }
     }
 
-    /// Returns the HID keycode if this is a simple Key action.
-    pub fn hid_code(&self) -> Option<u8> {
-        match self {
-            KeyAction::Key(code) => Some(*code),
-            _ => None,
-        }
+    /// The usage this action is "about": the first non-modifier slot, falling back
+    /// to the first live slot. A chord has no single canonical key on the wire — all
+    /// its slots are pressed — so this is for labelling and lookup only.
+    pub fn primary_usage(&self) -> Option<u8> {
+        let keys: &[u8] = match self {
+            KeyAction::Key(code) => return Some(*code),
+            KeyAction::Combo { keys } => keys,
+            _ => return None,
+        };
+        let live = || keys.iter().copied().filter(|&u| usage_is_live(u));
+        live()
+            .find(|u| !is_modifier_usage(*u))
+            .or_else(|| live().next())
     }
 }
 
@@ -257,18 +273,16 @@ impl fmt::Display for KeyAction {
         match self {
             KeyAction::Disabled => write!(f, "Disabled"),
             KeyAction::Key(code) => write!(f, "{}", hid::key_name(*code)),
-            KeyAction::Combo { mods, key } => {
+            KeyAction::Combo { keys } => {
                 let mut first = true;
-                for &(bit, name) in mods::DISPLAY_NAMES {
-                    if mods & bit != 0 {
-                        if !first {
-                            write!(f, "+")?;
-                        }
-                        write!(f, "{name}")?;
-                        first = false;
+                for &usage in keys.iter().filter(|&&u| usage_is_live(u)) {
+                    if !first {
+                        write!(f, "+")?;
                     }
+                    write!(f, "{}", hid::key_name(usage))?;
+                    first = false;
                 }
-                write!(f, "+{}", hid::key_name(*key))
+                Ok(())
             }
             KeyAction::Consumer(code) => {
                 let name = match code {
@@ -388,7 +402,8 @@ impl fmt::Display for KeyAction {
 #[derive(Debug, Clone)]
 pub enum ParseKeyActionError {
     UnknownKey(String),
-    UnknownModifier(String),
+    /// More `+`-separated keys than the wire format's three usage slots.
+    TooManyKeys(usize),
     InvalidHexCode,
     InvalidMouseButton,
     InvalidMacroIndex,
@@ -400,7 +415,7 @@ impl fmt::Display for ParseKeyActionError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownKey(name) => write!(f, "unknown key: \"{name}\""),
-            Self::UnknownModifier(name) => write!(f, "unknown modifier: \"{name}\""),
+            Self::TooManyKeys(n) => write!(f, "a chord holds at most {CHORD_SLOTS} keys, got {n}"),
             Self::InvalidHexCode => write!(f, "invalid hex keycode"),
             Self::InvalidMouseButton => write!(f, "invalid mouse button number"),
             Self::InvalidMacroIndex => write!(f, "invalid macro index"),
@@ -411,21 +426,6 @@ impl fmt::Display for ParseKeyActionError {
 }
 
 impl std::error::Error for ParseKeyActionError {}
-
-/// Parse a modifier name to its bitmask value.
-pub fn parse_modifier(name: &str) -> Option<u8> {
-    match name.to_ascii_lowercase().as_str() {
-        "ctrl" | "control" | "lctrl" | "lcontrol" => Some(mods::LCTRL),
-        "shift" | "lshift" | "lshf" => Some(mods::LSHIFT),
-        "alt" | "lalt" | "option" | "loption" => Some(mods::LALT),
-        "gui" | "win" | "super" | "cmd" | "lgui" | "lwin" => Some(mods::LGUI),
-        "rctrl" | "rcontrol" => Some(mods::RCTRL),
-        "rshift" | "rshf" => Some(mods::RSHIFT),
-        "ralt" | "roption" | "altgr" => Some(mods::RALT),
-        "rgui" | "rwin" | "rsuper" | "rcmd" => Some(mods::RGUI),
-        _ => None,
-    }
-}
 
 impl FromStr for KeyAction {
     type Err = ParseKeyActionError;
@@ -493,33 +493,29 @@ impl FromStr for KeyAction {
             });
         }
 
-        // Modifier+Key combo: "Ctrl+C", "Shift+Alt+F3"
-        if s.contains('+') {
-            let parts: Vec<&str> = s.split('+').collect();
-            if parts.len() < 2 {
+        // Chord: "Ctrl+C", "Shift+Alt+F3". Every token is resolved through the same
+        // usage table — modifiers are just usages 0xE0..=0xE7 — mirroring the vendor
+        // app, which maps all three chord slots through one `htmlCodeMapHIDCode`.
+        //
+        // A whole-string match wins over splitting, so keys whose own name contains
+        // the separator (`KP+`) stay reachable.
+        if s.contains('+') && hid::key_code_from_name(s).is_none() {
+            let parts: Vec<&str> = s.split('+').map(str::trim).collect();
+            if parts.len() < 2 || parts.iter().any(|p| p.is_empty()) {
                 return Err(ParseKeyActionError::EmptyCombo);
             }
-
-            // Try parsing all-but-last as modifiers, last as key
-            let mut mod_bits = 0u8;
-            for &part in &parts[..parts.len() - 1] {
-                let part = part.trim();
-                mod_bits |= parse_modifier(part)
-                    .ok_or_else(|| ParseKeyActionError::UnknownModifier(part.to_string()))?;
+            if parts.len() > CHORD_SLOTS {
+                return Err(ParseKeyActionError::TooManyKeys(parts.len()));
             }
 
-            let key_str = parts.last().unwrap().trim();
-            let key = hid::key_code_from_name(key_str)
-                .ok_or_else(|| ParseKeyActionError::UnknownKey(key_str.to_string()))?;
-
-            return if mod_bits == 0 {
-                Ok(KeyAction::Key(key))
-            } else {
-                Ok(KeyAction::Combo {
-                    mods: mod_bits,
-                    key,
-                })
-            };
+            let mut usages = Vec::with_capacity(parts.len());
+            for &part in &parts {
+                usages.push(
+                    hid::key_code_from_name(part)
+                        .ok_or_else(|| ParseKeyActionError::UnknownKey(part.to_string()))?,
+                );
+            }
+            return Ok(KeyAction::chord(usages));
         }
 
         // Plain key name: "A", "Enter", "F3", "CapsLock"
@@ -580,24 +576,30 @@ mod tests {
         assert_eq!(
             "Ctrl+C".parse::<KeyAction>().unwrap(),
             KeyAction::Combo {
-                mods: mods::LCTRL,
-                key: 0x06
+                keys: [0xE0, 0x06, 0]
             }
         );
         assert_eq!(
             "Shift+Alt+F3".parse::<KeyAction>().unwrap(),
             KeyAction::Combo {
-                mods: mods::LSHIFT | mods::LALT,
-                key: 0x3C
+                keys: [0xE1, 0xE2, 0x3C]
             }
         );
         assert_eq!(
             "RCtrl+RShift+A".parse::<KeyAction>().unwrap(),
             KeyAction::Combo {
-                mods: mods::RCTRL | mods::RSHIFT,
-                key: 0x04
+                keys: [0xE4, 0xE5, 0x04]
             }
         );
+    }
+
+    /// The wire format has exactly three usage slots.
+    #[test]
+    fn parse_combo_rejects_more_than_three_keys() {
+        assert!(matches!(
+            "Ctrl+Alt+Shift+A".parse::<KeyAction>(),
+            Err(ParseKeyActionError::TooManyKeys(4))
+        ));
     }
 
     #[test]
@@ -667,19 +669,17 @@ mod tests {
     fn display_combo() {
         assert_eq!(
             KeyAction::Combo {
-                mods: mods::LCTRL,
-                key: 0x06
+                keys: [0xE0, 0x06, 0]
             }
             .to_string(),
-            "Ctrl+C"
+            "LCtrl+C"
         );
         assert_eq!(
             KeyAction::Combo {
-                mods: mods::LSHIFT | mods::LALT,
-                key: 0x3C
+                keys: [0xE1, 0xE2, 0x3C]
             }
             .to_string(),
-            "Shift+Alt+F3"
+            "LShift+LAlt+F3"
         );
     }
 
@@ -754,11 +754,88 @@ mod tests {
     #[test]
     fn wire_roundtrip_combo() {
         let a = KeyAction::Combo {
-            mods: mods::LCTRL | mods::LSHIFT,
-            key: 0x06,
+            keys: [0xE0, 0xE1, 0x06],
         };
-        assert_eq!(a.to_config_bytes(), [0, 0x03, 0x06, 0]);
+        assert_eq!(a.to_config_bytes(), [0, 0xE0, 0xE1, 0x06]);
         assert_eq!(KeyAction::from_config_bytes(a.to_config_bytes()), a);
+    }
+
+    /// Byte-for-byte parity with the vendor webapp's `configToMatrix`, which emits
+    /// `case "combo": [0, skey, key, key2]` with modifiers as ordinary usages.
+    #[test]
+    fn vendor_parity_chord_encoding() {
+        for (spec, want) in [
+            ("A", [0, 0, 0x04, 0]),
+            ("Ctrl+C", [0, 0xE0, 0x06, 0]),
+            ("Ctrl+Shift+Escape", [0, 0xE0, 0xE1, 0x29]),
+        ] {
+            let action: KeyAction = spec.parse().unwrap();
+            assert_eq!(action.to_config_bytes(), want, "encoding {spec}");
+        }
+    }
+
+    /// `hid_key_press` (v407 @ 0x080078f4) returns early for usages below 0x04, so a
+    /// slot holding one is a firmware no-op. An older release wrote a modifier
+    /// *bitmask* into b1; `[0, 0x01, 0x06, 0]` really does emit a bare "C".
+    #[test]
+    fn legacy_bitmask_bytes_decode_to_what_the_key_emits() {
+        assert_eq!(
+            KeyAction::from_config_bytes([0, 0x01, 0x06, 0]),
+            KeyAction::Key(0x06)
+        );
+        // LAlt's old bitmask 0x04 collides with a real usage ("A"), so that one
+        // stays a chord — it is genuinely what the firmware presses.
+        assert_eq!(
+            KeyAction::from_config_bytes([0, 0x04, 0x06, 0]),
+            KeyAction::Combo {
+                keys: [0x04, 0x06, 0]
+            }
+        );
+    }
+
+    /// Every usage `Display` can name must parse back to itself, so the two HID
+    /// name tables can't drift apart (this is what caught `key_name` collapsing
+    /// 0x68..=0x73 to a single "F13-F24" label).
+    #[test]
+    fn parse_display_roundtrip_over_every_usage() {
+        for code in (0x04..=0x73u8).chain(0xE0..=0xE7) {
+            let name = hid::key_name(code);
+            if name == "?" {
+                continue;
+            }
+            let action = KeyAction::Key(code);
+            assert_eq!(
+                name.parse::<KeyAction>().unwrap(),
+                action,
+                "{name} ({code:#04x}) did not parse back"
+            );
+            assert_eq!(action.to_string(), name);
+        }
+    }
+
+    /// Same, for multi-usage chords.
+    #[test]
+    fn parse_display_roundtrip_over_chords() {
+        for spec in ["LCtrl+C", "LShift+LAlt+F3", "LCtrl+LShift+Escape", "A+B"] {
+            let action: KeyAction = spec.parse().unwrap();
+            assert_eq!(action.to_string(), spec);
+            assert_eq!(action.to_string().parse::<KeyAction>().unwrap(), action);
+        }
+    }
+
+    /// Decoding normalises slot placement, so a second pass must be a no-op.
+    #[test]
+    fn decode_is_idempotent() {
+        const SLOTS: [u8; 8] = [0, 0x01, 0x04, 0x06, 0x29, 0x68, 0xE0, 0xE1];
+        for &b1 in &SLOTS {
+            for &b2 in &SLOTS {
+                for &b3 in &SLOTS {
+                    let once = KeyAction::from_config_bytes([0, b1, b2, b3]);
+                    let twice = KeyAction::from_config_bytes(once.to_config_bytes());
+                    assert_eq!(once, twice, "[0, {b1:#04x}, {b2:#04x}, {b3:#04x}]");
+                }
+            }
+        }
     }
 
     #[test]

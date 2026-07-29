@@ -13,10 +13,56 @@
 //! A:Press,50ms,A:Release       — explicit press/release
 //! ```
 
-use crate::key_action::{self, mods, ParseKeyActionError};
+use crate::key_action::ParseKeyActionError;
 use crate::protocol::hid;
 use std::fmt;
 use std::str::FromStr;
+
+/// HID **report** modifier bitmask — the first byte of a standard HID keyboard
+/// report, one bit per modifier usage `0xE0..=0xE7`.
+///
+/// This is the macro engine's own vocabulary: macro steps are replayed as real HID
+/// reports, so a bitmask is the right model here. It deliberately does **not** apply
+/// to keymatrix config slots, where the firmware stores modifiers as ordinary usage
+/// codes (see [`crate::key_action::KeyAction::Combo`]). Keeping this module private
+/// makes mixing the two a compile error.
+mod mods {
+    pub const LCTRL: u8 = 0x01;
+    pub const LSHIFT: u8 = 0x02;
+    pub const LALT: u8 = 0x04;
+    pub const LGUI: u8 = 0x08;
+    pub const RCTRL: u8 = 0x10;
+    pub const RSHIFT: u8 = 0x20;
+    pub const RALT: u8 = 0x40;
+    pub const RGUI: u8 = 0x80;
+
+    /// Modifier bit → display name, in report-bit order.
+    pub const DISPLAY_NAMES: &[(u8, &str)] = &[
+        (LCTRL, "Ctrl"),
+        (LSHIFT, "Shift"),
+        (LALT, "Alt"),
+        (LGUI, "GUI"),
+        (RCTRL, "RCtrl"),
+        (RSHIFT, "RShift"),
+        (RALT, "RAlt"),
+        (RGUI, "RGUI"),
+    ];
+}
+
+/// Parse a modifier name to its report bitmask bit.
+fn parse_modifier(name: &str) -> Option<u8> {
+    match name.to_ascii_lowercase().as_str() {
+        "ctrl" | "control" | "lctrl" | "lcontrol" => Some(mods::LCTRL),
+        "shift" | "lshift" | "lshf" => Some(mods::LSHIFT),
+        "alt" | "lalt" | "option" | "loption" => Some(mods::LALT),
+        "gui" | "win" | "super" | "cmd" | "lgui" | "lwin" => Some(mods::LGUI),
+        "rctrl" | "rcontrol" => Some(mods::RCTRL),
+        "rshift" | "rshf" => Some(mods::RSHIFT),
+        "ralt" | "roption" | "altgr" => Some(mods::RALT),
+        "rgui" | "rwin" | "rsuper" | "rcmd" => Some(mods::RGUI),
+        _ => None,
+    }
+}
 
 /// A single step in a macro sequence (user-facing, before expansion).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,8 +159,8 @@ fn parse_key_spec(s: &str) -> Result<(u8, u8), ParseMacroSeqError> {
         let mut mod_bits = 0u8;
         for &part in &parts[..parts.len() - 1] {
             let part = part.trim();
-            mod_bits |= key_action::parse_modifier(part)
-                .ok_or_else(|| ParseKeyActionError::UnknownModifier(part.to_string()))?;
+            mod_bits |= parse_modifier(part)
+                .ok_or_else(|| ParseKeyActionError::UnknownKey(part.to_string()))?;
         }
         let key_str = parts.last().unwrap().trim();
         let key = hid::key_code_from_name(key_str)

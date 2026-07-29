@@ -188,12 +188,11 @@ fn parse_user_remap_format() {
 
 #[test]
 fn parse_combo_format() {
-    // [0, mods, key, 0]
+    // [0, skey, key, key2] — three independent HID usages, modifiers as 0xE0..=0xE7
     assert_eq!(
-        KeyAction::from_config_bytes([0, 0x01, 0x06, 0]),
+        KeyAction::from_config_bytes([0, 0xE0, 0x06, 0]),
         KeyAction::Combo {
-            mods: 0x01,
-            key: 0x06
+            keys: [0xE0, 0x06, 0]
         }
     );
 }
@@ -410,11 +409,10 @@ fn remap_display_format() {
         format!(
             "{}",
             KeyAction::Combo {
-                mods: 0x01,
-                key: 0x06
+                keys: [0xE0, 0x06, 0]
             }
         ),
-        "Ctrl+C"
+        "LCtrl+C"
     );
 }
 
@@ -538,11 +536,10 @@ fn caps_roundtrip_identity_not_detected() {
 #[test]
 fn caps_roundtrip_combo() {
     let action = KeyAction::Combo {
-        mods: 0x01, // LCtrl
-        key: 0x06,  // C
+        keys: [0xE0, 0x06, 0], // LCtrl + C
     };
     let wire = action.to_config_bytes();
-    assert_eq!(wire, [0, 0x01, 0x06, 0]);
+    assert_eq!(wire, [0, 0xE0, 0x06, 0]);
     assert_eq!(KeyAction::from_config_bytes(wire), action);
     assert!(is_user_remap(&wire, caps_default()));
 }
@@ -550,11 +547,10 @@ fn caps_roundtrip_combo() {
 #[test]
 fn caps_roundtrip_combo_shift_alt() {
     let action = KeyAction::Combo {
-        mods: 0x02 | 0x04, // LShift + LAlt
-        key: 0x3C,         // F3
+        keys: [0xE1, 0xE2, 0x3C], // LShift + LAlt + F3
     };
     let wire = action.to_config_bytes();
-    assert_eq!(wire, [0, 0x06, 0x3C, 0]);
+    assert_eq!(wire, [0, 0xE1, 0xE2, 0x3C]);
     assert_eq!(KeyAction::from_config_bytes(wire), action);
     assert!(is_user_remap(&wire, caps_default()));
 }
@@ -662,8 +658,7 @@ fn caps_all_remap_types_in_matrix_scan() {
     let actions: &[KeyAction] = &[
         KeyAction::Key(0x05), // B
         KeyAction::Combo {
-            mods: 0x01,
-            key: 0x06,
+            keys: [0xE0, 0x06, 0],
         }, // Ctrl+C
         KeyAction::Macro { index: 0, kind: 0 }, // Macro(0)
         KeyAction::Macro { index: 2, kind: 2 }, // Macro(2,hold)

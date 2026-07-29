@@ -4,7 +4,6 @@
 //! events, reconstructing from events, and displaying — exercising the
 //! boundary between `macro_seq`, `key_action`, and `protocol::hid`.
 
-use iot_driver::key_action::mods;
 use iot_driver::macro_seq::{MacroSeq, MacroStep};
 
 // ── Full pipeline: parse → expand → reconstruct → display ──
@@ -144,7 +143,8 @@ fn pipeline_multi_modifier_combo() {
     assert_eq!(seq.steps.len(), 1);
     match &seq.steps[0] {
         MacroStep::TapCombo { mods: m, key, .. } => {
-            assert_eq!(*m, mods::LCTRL | mods::LSHIFT | mods::LALT);
+            // HID report modifier bits: LCtrl | LShift | LAlt
+            assert_eq!(*m, 0x01 | 0x02 | 0x04);
             assert_eq!(*key, 0x04);
         }
         other => panic!("expected TapCombo, got {other:?}"),

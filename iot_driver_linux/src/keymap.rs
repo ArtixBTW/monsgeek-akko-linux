@@ -174,35 +174,18 @@ impl KeyMap {
 /// `default_hid_code`: the factory default HID keycode for this matrix position,
 /// derived from `hid::key_code_from_name(matrix::key_name(i))`.
 pub fn is_user_remap(k: &[u8], default_hid_code: u8) -> bool {
-    if k.len() < 4 {
+    let Ok(bytes) = <[u8; 4]>::try_from(k) else {
         return false;
+    };
+    match KeyAction::from_config_bytes(bytes) {
+        // An all-zero slot is how the overlay layers spell "transparent", and the
+        // Fn key sits at its own physical position by default.
+        KeyAction::Disabled | KeyAction::Fn => false,
+        // Comparing the decoded action, not raw bytes, means a slot written to the
+        // position's own factory keycode reads as unmodified whichever usage slot
+        // it landed in.
+        action => action != KeyAction::Key(default_hid_code),
     }
-
-    // Disabled: never a remap
-    if k[0] == 0 && k[1] == 0 && k[2] == 0 && k[3] == 0 {
-        return false;
-    }
-
-    // Fn key at physical Fn position: factory default
-    if matches!(
-        KeyAction::from_config_bytes([k[0], k[1], k[2], k[3]]),
-        KeyAction::Fn
-    ) {
-        return false;
-    }
-
-    // Non-zero config_type (mouse/macro/consumer/etc): always a remap
-    if k[0] != 0 {
-        return true;
-    }
-
-    // Byte 1 non-zero (user remap format or combo): always a remap
-    if k[1] != 0 {
-        return true;
-    }
-
-    // config_type=0, byte1=0, byte2!=0: compare against factory default
-    k[2] != default_hid_code
 }
 
 // ---------------------------------------------------------------------------
@@ -608,5 +591,18 @@ mod tests {
     #[test]
     fn remap_detection_fn_key() {
         assert!(!is_user_remap(&[10, 1, 0, 0], 0xE4));
+    }
+
+    /// A slot written to the position's own factory keycode is not a remap, whichever
+    /// usage slot it landed in — the old byte-1-non-zero rule called this customised.
+    #[test]
+    fn remap_detection_default_written_to_slot_one() {
+        assert!(!is_user_remap(&[0, 0x29, 0, 0], 0x29));
+    }
+
+    /// A chord is always a remap: no factory position emits more than one usage.
+    #[test]
+    fn remap_detection_chord() {
+        assert!(is_user_remap(&[0, 0xE0, 0x06, 0], 0x06));
     }
 }
