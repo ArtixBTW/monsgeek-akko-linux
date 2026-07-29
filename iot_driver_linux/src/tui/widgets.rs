@@ -3,6 +3,7 @@
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
+    text::Line,
     widgets::{Block, Borders, Clear, List, ListItem, ListState},
     Frame,
 };
@@ -22,6 +23,8 @@ pub(crate) struct PopupSelect<T> {
     filtered: Vec<usize>,
     /// Case-insensitive substring typed by the user to narrow a long list.
     filter: String,
+    /// Key hint drawn along the bottom border, for selectors with extra bindings.
+    hint: Option<String>,
     state: ListState,
 }
 
@@ -39,8 +42,21 @@ impl<T> PopupSelect<T> {
             items,
             filtered,
             filter: String::new(),
+            hint: None,
             state,
         }
+    }
+
+    /// Add a key hint along the bottom border.
+    pub(crate) fn with_hint(mut self, hint: impl Into<String>) -> Self {
+        self.hint = Some(hint.into());
+        self
+    }
+
+    /// Drop the typed filter, restoring the full list.
+    pub(crate) fn clear_filter(&mut self) {
+        self.filter.clear();
+        self.refilter();
     }
 
     /// Recompute the filtered view and clamp the selection into it.
@@ -143,13 +159,16 @@ impl<T> PopupSelect<T> {
         } else {
             format!("{} /{}", self.title, self.filter)
         };
-        let content_w = self
-            .filtered
-            .iter()
-            .map(|&i| self.items[i].0.len())
-            .max()
-            .unwrap_or(0)
-            .max(title.len()) as u16;
+        // Measured over every item, not just the visible ones: the popup must not
+        // jump around horizontally while the filter narrows the list.
+        let content_w =
+            self.items
+                .iter()
+                .map(|(label, _)| label.chars().count())
+                .max()
+                .unwrap_or(0)
+                .max(title.chars().count())
+                .max(self.hint.as_ref().map_or(0, |h| h.chars().count())) as u16;
         // +2 borders, +2 for the "> " highlight symbol.
         let width = (content_w + 4).min(area.width);
         let height = (self.filtered.len() as u16 + 2).min(area.height);
@@ -162,8 +181,12 @@ impl<T> PopupSelect<T> {
             .iter()
             .map(|&i| ListItem::new(self.items[i].0.as_str()))
             .collect();
+        let mut block = Block::default().borders(Borders::ALL).title(title);
+        if let Some(hint) = &self.hint {
+            block = block.title_bottom(Line::from(hint.as_str()).centered());
+        }
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(block)
             .highlight_style(
                 Style::default()
                     .bg(Color::Blue)
@@ -211,6 +234,20 @@ mod tests {
     fn empty_selector_has_no_selection() {
         let p: PopupSelect<u8> = PopupSelect::new("t", vec![]);
         assert_eq!(p.selected(), None);
+    }
+
+    #[test]
+    fn clear_filter_restores_the_full_list() {
+        let mut p = sample();
+        p.push_filter('b');
+        assert_eq!(p.selected(), Some(&2));
+        p.clear_filter();
+        // Back to every row, selection clamped into the widened view.
+        p.up();
+        assert_eq!(p.selected(), Some(&1));
+        p.down();
+        p.down();
+        assert_eq!(p.selected(), Some(&3));
     }
 
     /// Typing a letter should offer the exact key, then names starting with it,

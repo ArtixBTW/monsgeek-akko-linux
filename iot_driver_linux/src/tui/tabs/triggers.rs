@@ -705,7 +705,8 @@ impl TriggerEditModal {
         );
         self.picker_title = format!("{title} output");
         self.chord_buf.clear();
-        let mut picker = PopupSelect::new(self.picker_title.clone(), items);
+        let mut picker = PopupSelect::new(self.picker_title.clone(), items)
+            .with_hint("type: filter   Tab: add to chord   Enter: confirm   Esc: cancel");
         picker.select_where(|&a| a == current);
         self.output_picker = Some(picker);
     }
@@ -727,6 +728,9 @@ impl TriggerEditModal {
         let staged = self.chord_preview();
         if let Some(p) = self.output_picker.as_mut() {
             p.set_title(staged);
+            // Drop the search text so the next key of the chord can be typed
+            // straight away instead of backspacing over the previous one.
+            p.clear_filter();
         }
     }
 
