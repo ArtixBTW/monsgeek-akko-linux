@@ -184,7 +184,9 @@ impl ProfileRegistry {
     /// authoritative source first:
     ///
     /// 1. a builtin [`DeviceProfile`] matched by firmware **device id** (hand-curated
-    ///    layouts such as the M1 V5),
+    ///    layouts such as the M1 V5), with any position it leaves unnamed filled from
+    ///    the matrix DB — a curated profile is more trustworthy where it speaks, but
+    ///    it should not hide keys it simply never listed,
     /// 2. the id-resolved matrix-DB entry from `device_matrices.json` (covers every
     ///    third-party board), then
     /// 3. a builtin profile matched only by **VID/PID**, as a last resort when the
@@ -201,13 +203,35 @@ impl ProfileRegistry {
         vid: u16,
         pid: u16,
     ) -> Option<Vec<String>> {
+        let matrix = device_id.and_then(|id| self.get_device_matrix(vid, pid, id));
+        let db_names = |i: usize| {
+            matrix
+                .and_then(|m| m.key_name(i))
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+        };
+
         if let Some(p) = device_id.and_then(|id| self.find_by_id(id as u32)) {
-            return Some(profile_key_names(p.as_ref()));
+            // A hand-curated profile wins position by position, but the matrix DB
+            // fills any gap it leaves: the M1 V5 builtin, for instance, names
+            // nothing past the arrow cluster, while the DB knows its volume and
+            // HID keys at 90/91/96/97.
+            let mut names = profile_key_names(p.as_ref());
+            let extra = matrix.map_or(0, |m| m.matrix_size());
+            names.resize(names.len().max(extra), String::new());
+            for (i, name) in names.iter_mut().enumerate() {
+                if name.is_empty() {
+                    if let Some(db) = db_names(i) {
+                        *name = db;
+                    }
+                }
+            }
+            return Some(names);
         }
-        if let Some(m) = device_id.and_then(|id| self.get_device_matrix(vid, pid, id)) {
+        if let Some(m) = matrix {
             return Some(
                 (0..m.matrix_size())
-                    .map(|i| m.key_name(i).unwrap_or("").to_string())
+                    .map(|i| db_names(i).unwrap_or_default())
                     .collect(),
             );
         }
@@ -348,6 +372,21 @@ mod tests {
             .expect("SK75 key names (needs data/device_matrices.json)");
         assert_eq!(sk75[84], "Home");
         assert_eq!(sk75[85], "End");
+    }
+
+    /// The M1 V5 builtin names nothing past the arrow cluster, but the matrix DB
+    /// knows its volume keys — a curated profile shouldn't hide them.
+    #[test]
+    fn builtin_gaps_are_filled_from_the_matrix_db() {
+        let registry = ProfileRegistry::with_builtins();
+        let names = registry
+            .resolve_matrix_key_names(Some(2949), 0x3151, 0x5030)
+            .expect("M1 V5 key names");
+        // Curated names still win where the builtin has one.
+        assert_eq!(names[85], "Home");
+        // Gaps fall through to the DB.
+        assert_eq!(names[90], "VolUp");
+        assert_eq!(names[91], "VolDn");
     }
 
     #[test]

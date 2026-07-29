@@ -27,6 +27,34 @@ use std::str::FromStr;
 /// Usage slots in one keymatrix entry: bytes 1..=3, all pressed together.
 pub const CHORD_SLOTS: usize = 3;
 
+/// Consumer-page usages the firmware accepts in a keymatrix slot (config_type 3),
+/// with the names used for both display and parsing so the two can't drift.
+pub const CONSUMER_KEYS: &[(u16, &str)] = &[
+    (0x00B5, "Next Track"),
+    (0x00B6, "Previous Track"),
+    (0x00B7, "Stop"),
+    (0x00CD, "Play/Pause"),
+    (0x00E2, "Mute"),
+    (0x00E9, "Volume Up"),
+    (0x00EA, "Volume Down"),
+    (0x006F, "Brightness Up"),
+    (0x0070, "Brightness Down"),
+    (0x0183, "Word Processor"),
+    (0x018A, "Mail"),
+    (0x0192, "Calculator"),
+    (0x0194, "My Computer"),
+    (0x0221, "Search"),
+    (0x0223, "Browser Home"),
+];
+
+/// Name for a consumer usage, if it has one.
+fn consumer_name(code: u16) -> Option<&'static str> {
+    CONSUMER_KEYS
+        .iter()
+        .find(|&&(c, _)| c == code)
+        .map(|&(_, n)| n)
+}
+
 /// Protocol config_type constants for the 4-byte key config.
 mod config_type {
     pub const KEY: u8 = 0;
@@ -284,31 +312,10 @@ impl fmt::Display for KeyAction {
                 }
                 Ok(())
             }
-            KeyAction::Consumer(code) => {
-                let name = match code {
-                    0x00B5 => "Next Track",
-                    0x00B6 => "Previous Track",
-                    0x00B7 => "Stop",
-                    0x00CD => "Play/Pause",
-                    0x00E2 => "Mute",
-                    0x00E9 => "Volume Up",
-                    0x00EA => "Volume Down",
-                    0x006F => "Brightness Up",
-                    0x0070 => "Brightness Down",
-                    0x0183 => "Word Processor",
-                    0x018A => "Mail",
-                    0x0192 => "Calculator",
-                    0x0194 => "My Computer",
-                    0x0221 => "Search",
-                    0x0223 => "Browser Home",
-                    _ => "",
-                };
-                if name.is_empty() {
-                    write!(f, "Consumer(0x{code:04X})")
-                } else {
-                    write!(f, "{name}")
-                }
-            }
+            KeyAction::Consumer(code) => match consumer_name(*code) {
+                Some(name) => write!(f, "{name}"),
+                None => write!(f, "Consumer(0x{code:04X})"),
+            },
             KeyAction::Mouse(btn) => write!(f, "Mouse{btn}"),
             KeyAction::Macro { index, kind } => match kind {
                 0 => write!(f, "Macro({index})"),
@@ -491,6 +498,30 @@ impl FromStr for KeyAction {
             } else {
                 KeyAction::Key(code)
             });
+        }
+
+        // Consumer/media usages, by name or by the `Consumer(0x00E9)` form that
+        // Display emits for codes with no name. Checked before the chord split so
+        // names containing '+' (none today, but "Vol+" is the obvious future one)
+        // can't be mistaken for a chord.
+        if let Some(&(code, _)) = CONSUMER_KEYS
+            .iter()
+            .find(|(_, name)| name.eq_ignore_ascii_case(s))
+        {
+            return Ok(KeyAction::Consumer(code));
+        }
+        if let Some(rest) = s
+            .strip_prefix("Consumer(")
+            .or_else(|| s.strip_prefix("consumer("))
+            .and_then(|r| r.strip_suffix(')'))
+        {
+            let hex = rest
+                .trim()
+                .trim_start_matches("0x")
+                .trim_start_matches("0X");
+            let code =
+                u16::from_str_radix(hex, 16).map_err(|_| ParseKeyActionError::InvalidHexCode)?;
+            return Ok(KeyAction::Consumer(code));
         }
 
         // Chord: "Ctrl+C", "Shift+Alt+F3". Every token is resolved through the same
@@ -811,6 +842,20 @@ mod tests {
             );
             assert_eq!(action.to_string(), name);
         }
+    }
+
+    /// Every named consumer usage must survive Display -> parse, and unnamed ones
+    /// must survive through the `Consumer(0xNNNN)` form Display falls back to.
+    #[test]
+    fn parse_display_roundtrip_over_consumer_usages() {
+        for &(code, name) in CONSUMER_KEYS {
+            let action = KeyAction::Consumer(code);
+            assert_eq!(action.to_string(), name);
+            assert_eq!(name.parse::<KeyAction>().unwrap(), action, "{name}");
+        }
+        let unnamed = KeyAction::Consumer(0x0042);
+        assert_eq!(unnamed.to_string(), "Consumer(0x0042)");
+        assert_eq!(unnamed.to_string().parse::<KeyAction>().unwrap(), unnamed);
     }
 
     /// Same, for multi-usage chords.

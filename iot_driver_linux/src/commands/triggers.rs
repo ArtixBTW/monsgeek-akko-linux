@@ -774,7 +774,9 @@ pub fn dks(
         }
         for (i, binding_spec) in binding_specs.iter().enumerate() {
             if binding_spec.is_empty() {
-                config.bindings[i].config = [0; 4];
+                // An empty spec clears the whole slot. Leaving the phase roles behind
+                // would keep a packed mode byte for a slot that emits nothing.
+                config.bindings[i] = DksBinding::default();
                 continue;
             }
             let parts: Vec<&str> = binding_spec.split(':').collect();

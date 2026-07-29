@@ -1,6 +1,7 @@
 //! Key vocabulary shared across TUI tabs: the bindable key and consumer-usage
 //! lists, and the layer filter.
 
+pub(in crate::tui) use crate::key_action::CONSUMER_KEYS;
 use crate::protocol::hid::key_name;
 
 /// Layer filter for the key-mapping views.
@@ -32,24 +33,6 @@ impl RemapLayerView {
         }
     }
 }
-
-/// Consumer-page usages the firmware accepts in a keymatrix slot (config_type 3).
-pub(in crate::tui) const CONSUMER_KEYS: &[(u16, &str)] = &[
-    (0x00B5, "Next Track"),
-    (0x00B6, "Previous Track"),
-    (0x00B7, "Stop"),
-    (0x00CD, "Play/Pause"),
-    (0x00E2, "Mute"),
-    (0x00E9, "Volume Up"),
-    (0x00EA, "Volume Down"),
-    (0x006F, "Brightness Up"),
-    (0x0070, "Brightness Down"),
-    (0x018A, "Mail"),
-    (0x0192, "Calculator"),
-    (0x0194, "My Computer"),
-    (0x0221, "Search"),
-    (0x0223, "Browser Home"),
-];
 
 /// Every bindable HID keyboard usage, including the modifiers `0xE0..=0xE7`
 /// (the firmware treats those as ordinary usages), sorted by name.
