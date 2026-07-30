@@ -118,7 +118,8 @@ iot_driver keymatrix --unset --raw          # Include defaults, with the device'
 # Profiles — the keyboard has four, with independent keymaps
 iot_driver profile                # Which one the board is running
 iot_driver set-profile 1          # Switch the board
-iot_driver --profile 1 keymatrix  # Inspect or edit another profile without switching
+iot_driver --profile 1 keymatrix  # Inspect or edit another profile's keymap
+iot_driver --profile 1 set-actuation 1.5  # Trigger settings: switches, applies, restores
 
 # Macros
 iot_driver set-macro F1 "Hello"          # Text macro

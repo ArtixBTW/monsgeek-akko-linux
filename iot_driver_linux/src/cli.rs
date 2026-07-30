@@ -38,11 +38,10 @@ pub struct Cli {
 
     /// Operate on a specific profile (0-3) instead of the board's active one.
     ///
-    /// Applies to the keymap — base layers and Fn — which is all the wire protocol
-    /// addresses by profile. Trigger and magnetism settings carry no profile byte:
-    /// the firmware applies them to whatever profile is active, so `set-key-trigger`
-    /// and friends ignore this flag. The keyboard keeps running whatever `profile`
-    /// reports; use `set-profile` to switch it.
+    /// Keymap commands address the profile directly. Trigger and magnetism settings
+    /// carry no profile byte, so those commands briefly switch the keyboard to the
+    /// requested profile, apply, and switch back — announced when it happens.
+    /// Use `set-profile` to change which profile the keyboard runs.
     #[arg(short = 'P', long, global = true, value_name = "N",
           value_parser = clap::value_parser!(u8).range(0..4))]
     pub profile: Option<u8>,
