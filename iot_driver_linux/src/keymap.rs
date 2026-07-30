@@ -145,7 +145,7 @@ impl KeyRow {
 ///
 /// `sys` selects the Fn table's OS variant (0 = Windows, 1 = Mac).
 pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, KeyboardError> {
-    let key_count = kb.key_count() as usize;
+    let key_count = kb.matrix_positions() as usize;
 
     // Keymatrix layers 0–3 (outputs / DKS combos) + the separate Fn table.
     let profile = kb.active_profile();

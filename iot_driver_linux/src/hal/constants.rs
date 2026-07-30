@@ -55,8 +55,15 @@ pub const INTERFACE_FEATURE: i32 = 2;
 /// Interface number for INPUT interface
 pub const INTERFACE_INPUT: i32 = 1;
 
-/// Number of physical keys on M1 V5 HE
-pub const KEY_COUNT_M1_V5: u8 = 98;
+/// Physical inputs on the M1 V5 HE: 81 magnetic switches plus the volume encoder.
+///
+/// Distinct from the two matrix figures below. The matrix DB counts 85 *named*
+/// positions for this board — the 81 switches, both encoder directions, and two
+/// pseudo-entries at 96/97 whose HID codes (1, 2) are not valid usages.
+pub const KEY_COUNT_M1_V5: u8 = 82;
 
-/// Total matrix positions for M1 V5 HE (98 active keys + empty positions)
+/// One past the highest matrix position the M1 V5 HE uses, i.e. how far a scan runs.
+pub const MATRIX_EXTENT_M1_V5: u8 = 98;
+
+/// Full matrix array dimension for M1 V5 HE (21 columns x 6 rows, mostly gaps).
 pub const MATRIX_SIZE_M1_V5: usize = 126;

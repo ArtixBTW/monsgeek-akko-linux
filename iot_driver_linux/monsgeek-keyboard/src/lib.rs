@@ -253,8 +253,15 @@ impl KeyboardInterface {
         &self.transport
     }
 
-    /// Get number of keys
-    pub fn key_count(&self) -> u8 {
+    /// How many matrix positions to scan, i.e. one past the highest position the
+    /// board uses.
+    ///
+    /// **Not** the number of keys. The matrix is sparse: it has gaps, and on this
+    /// family the tail holds an encoder and a couple of pseudo-entries. Callers walk
+    /// `0..matrix_positions()` and filter by name — see `keymap::build_key_rows` or
+    /// `commands::triggers::calibrate`. For a count to show a user, take the named
+    /// or analog positions from the matrix database instead.
+    pub fn matrix_positions(&self) -> u8 {
         self.key_count
     }
 
@@ -1551,7 +1558,7 @@ impl KeyboardInterface {
                 profile,
                 magic: 0xFF,
                 page: page as u8,
-                magnetism_profile: layer,
+                layer,
             };
 
             match self.transport.query_raw(

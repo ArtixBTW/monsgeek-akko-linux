@@ -335,7 +335,8 @@ mod tests {
         // Find wired variant
         let profile = registry.find_by_vid_pid(0x3151, 0x5030).unwrap();
         assert_eq!(profile.display_name(), "MonsGeek M1 V5 HE");
-        assert_eq!(profile.key_count(), 98);
+        // Physical inputs, not matrix positions: 81 switches + the encoder.
+        assert_eq!(profile.key_count(), 82);
 
         // Find wireless and dongle variants
         let profile = registry.find_by_vid_pid(0x3151, 0x503A).unwrap();

@@ -36,13 +36,13 @@ fn stop_calibration(keyboard: &KeyboardInterface) {
 
 /// Run calibration (min + max) with per-key progress display
 pub fn calibrate(keyboard: &KeyboardInterface) -> CommandResult {
-    let key_count = keyboard.key_count() as usize;
+    let positions = keyboard.matrix_positions() as usize;
 
     // Determine which matrix indices have real analog (magnetic) keys.
     // Excluded: empty-name positions (gaps), non-analog positions (encoder/GPIO).
     let has_key_names = !keyboard.matrix_key_name(0).is_empty();
     let real_keys: HashSet<usize> = if has_key_names {
-        (0..key_count)
+        (0..positions)
             .filter(|&i| {
                 let name = keyboard.matrix_key_name(i);
                 !name.is_empty() && name != "?" && !keyboard.is_non_analog(i)
@@ -50,7 +50,7 @@ pub fn calibrate(keyboard: &KeyboardInterface) -> CommandResult {
             .collect()
     } else {
         // No profile key names available — exclude non-analog but include rest
-        (0..key_count)
+        (0..positions)
             .filter(|&i| !keyboard.is_non_analog(i))
             .collect()
     };
@@ -65,7 +65,7 @@ pub fn calibrate(keyboard: &KeyboardInterface) -> CommandResult {
         eprintln!("Warning: Could not set Ctrl+C handler: {e}");
     }
 
-    println!("Starting calibration for {real_count} keys ({key_count} matrix positions)...");
+    println!("Starting calibration for {real_count} keys ({positions} matrix positions)...");
     if !has_key_names {
         println!("  (No device profile found — key names unavailable)");
     }
@@ -109,7 +109,7 @@ pub fn calibrate(keyboard: &KeyboardInterface) -> CommandResult {
 
     // Poll and display progress
     let mut finished = BTreeSet::new();
-    let pages = key_count.div_ceil(32);
+    let pages = positions.div_ceil(32);
 
     // Set up input monitoring: stdin + mouse clicks + encoder knob (evdev)
     let input = setup_input_monitor(keyboard.vid(), keyboard.pid());
@@ -479,9 +479,9 @@ pub fn triggers(keyboard: &KeyboardInterface) -> CommandResult {
                 .all(|&v| v == first_mode);
 
             if all_same_press && all_same_mode {
-                println!("All {num_keys} keys have identical settings");
+                println!("All {num_keys} matrix positions have identical settings");
             } else {
-                println!("Keys have varying settings ({num_keys} keys total)");
+                println!("Settings vary across the {num_keys} matrix positions");
                 println!("\nFirst 10 key values:");
                 for i in 0..10.min(num_keys) {
                     let press = triggers.press_travel.get(i).copied().unwrap_or(0);

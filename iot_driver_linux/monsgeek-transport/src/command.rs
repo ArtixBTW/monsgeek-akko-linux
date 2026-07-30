@@ -1257,13 +1257,18 @@ impl HidCommand for SetFnData {
 }
 
 /// GET_KEYMATRIX (0x8A) query data — 4 bytes.
+///
+/// Byte 3 selects the keymatrix sub-layer, not a second profile: layers 0/1 are the
+/// key's Base and Layer1 outputs, and in DKS mode the firmware reinterprets all four
+/// as that key's output slots. (It was named `magnetism_profile` for a while, which
+/// read as a profile axis that does not exist.)
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct GetKeyMatrixData {
     pub profile: u8,
     pub magic: u8,
     pub page: u8,
-    pub magnetism_profile: u8,
+    pub layer: u8,
 }
 
 /// GET_FN (0x90) query data — 4 bytes.
@@ -2748,7 +2753,7 @@ mod tests {
             profile: 0,
             magic: 0xFF,
             page: 3,
-            magnetism_profile: 0,
+            layer: 0,
         };
         let bytes = pkt.as_bytes();
         assert_eq!(bytes, &[0, 0xFF, 3, 0]);
