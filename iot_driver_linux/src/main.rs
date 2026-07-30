@@ -210,12 +210,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }) => {
             commands::with_keyboard(&ctx, |kb| commands::keymap::swap(kb, &key1, &key2, profile))?;
         }
-        Some(Commands::RemapList { layer, all }) => {
-            commands::with_keyboard(&ctx, |kb| commands::keymap::remap_list(kb, layer, all))?;
-        }
-        Some(Commands::FnLayout { sys }) => {
-            commands::with_keyboard(&ctx, |kb| commands::keymap::fn_layout(kb, &sys))?;
-        }
         Some(Commands::Keymatrix {
             layer,
             unset,

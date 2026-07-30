@@ -365,27 +365,8 @@ pub enum Commands {
         profile: u8,
     },
 
-    /// List key remappings (non-default bindings)
-    #[command(visible_alias = "remaps")]
-    RemapList {
-        /// Layer: 0=base, 1=layer1, 2=fn, omit=all
-        #[arg(short, long)]
-        layer: Option<u8>,
-        /// Show all keys including factory defaults and disabled positions
-        #[arg(short, long)]
-        all: bool,
-    },
-
-    /// Show the Fn layer key bindings (media keys, LED controls, etc.)
-    #[command(visible_alias = "fnl")]
-    FnLayout {
-        /// OS mode: "win" or "mac"
-        #[arg(long, default_value = "win")]
-        sys: String,
-    },
-
     /// Show per-key bindings across layers (customised keys only by default)
-    #[command(visible_alias = "km")]
+    #[command(visible_aliases = ["km", "remaps", "remap-list", "fnl", "fn-layout"])]
     Keymatrix {
         /// Layers to show: base|l0|0, l1|1, fn|2 (comma-separated; default all).
         /// DKS keys have no Layer1 — their slots 1-3 are outputs, not a layer.

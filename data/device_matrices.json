@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "generatedAt": "2026-07-23T20:53:05.254Z",
+  "generatedAt": "2026-07-23T22:16:36.851Z",
   "description": "Key matrix per device, keyed \"vid:pid:id\". Matrix is position -> HID code, keyNames is position -> key name. nonAnalogPositions lists matrix indices of GPIO/encoder keys (not magnetic switches).",
   "stats": {
     "totalKeyboards": 921,

@@ -18,154 +18,6 @@ use monsgeek_keyboard::{
 pub use monsgeek_transport::protocol::{KeyRef, Layer};
 
 // ---------------------------------------------------------------------------
-// KeyEntry — single key in a keymap snapshot
-// ---------------------------------------------------------------------------
-
-/// A single key in a keymap snapshot.
-#[derive(Debug, Clone, PartialEq)]
-pub struct KeyEntry {
-    pub index: u8,
-    pub position: &'static str,
-    pub layer: Layer,
-    pub action: KeyAction,
-    /// True when the key differs from factory default.
-    pub is_remapped: bool,
-}
-
-impl KeyEntry {
-    /// Format the key reference part (e.g. "Fn+Caps").
-    pub fn key_ref(&self) -> KeyRef {
-        KeyRef {
-            index: self.index,
-            position: self.position,
-            layer: self.layer,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RawKeyMapData — decoupled I/O for testability
-// ---------------------------------------------------------------------------
-
-/// Raw bytes read from the keyboard, before parsing.
-pub struct RawKeyMapData {
-    /// Keymatrix layer 0 (profile 0) — the key's base output.
-    pub base0: Vec<u8>,
-    /// Keymatrix layer 1 (profile 0) — the Layer1 overlay.
-    pub base1: Vec<u8>,
-    /// GET_FN — Fn layer (None if read failed).
-    pub fn_layer: Option<Vec<u8>>,
-    /// Number of physical keys.
-    pub key_count: usize,
-}
-
-// ---------------------------------------------------------------------------
-// KeyMap — complete keymap snapshot
-// ---------------------------------------------------------------------------
-
-/// A complete keymap snapshot across all layers.
-pub struct KeyMap {
-    entries: Vec<KeyEntry>,
-}
-
-impl KeyMap {
-    /// Parse raw keymatrix data into a `KeyMap`.
-    pub fn from_raw(raw: &RawKeyMapData) -> Self {
-        // Build factory default keycodes from the transport's matrix key names.
-        let defaults: Vec<u8> = (0..raw.key_count as u8)
-            .map(|i| hid::key_code_from_name(matrix::key_name(i)).unwrap_or(0))
-            .collect();
-
-        let mut entries = Vec::new();
-
-        // Parse base layers 0 and 1
-        for (layer, data) in [(Layer::Base, &raw.base0), (Layer::Layer1, &raw.base1)] {
-            for i in 0..raw.key_count {
-                if i * 4 + 3 >= data.len() {
-                    break;
-                }
-                let name = matrix::key_name(i as u8);
-                if name == "?" {
-                    continue;
-                }
-
-                let k = &data[i * 4..(i + 1) * 4];
-                let action = KeyAction::from_config_bytes([k[0], k[1], k[2], k[3]]);
-                let is_remapped = is_user_remap(k, defaults[i]);
-
-                entries.push(KeyEntry {
-                    index: i as u8,
-                    position: name,
-                    layer,
-                    action,
-                    is_remapped,
-                });
-            }
-        }
-
-        // Parse Fn layer
-        if let Some(fn_data) = &raw.fn_layer {
-            for i in 0..raw.key_count {
-                if i * 4 + 3 >= fn_data.len() {
-                    break;
-                }
-                let name = matrix::key_name(i as u8);
-                if name == "?" {
-                    continue;
-                }
-
-                let k = &fn_data[i * 4..(i + 1) * 4];
-                if k == [0, 0, 0, 0] {
-                    continue; // empty slot in Fn layer
-                }
-
-                let action = KeyAction::from_config_bytes([k[0], k[1], k[2], k[3]]);
-
-                // For Fn layer, all non-empty entries are "remapped" (they represent bindings)
-                entries.push(KeyEntry {
-                    index: i as u8,
-                    position: name,
-                    layer: Layer::Fn,
-                    action,
-                    is_remapped: true,
-                });
-            }
-        }
-
-        KeyMap { entries }
-    }
-
-    /// All entries across all layers.
-    pub fn iter(&self) -> impl Iterator<Item = &KeyEntry> {
-        self.entries.iter()
-    }
-
-    /// Only entries where `is_remapped == true`.
-    pub fn remaps(&self) -> impl Iterator<Item = &KeyEntry> {
-        self.entries.iter().filter(|e| e.is_remapped)
-    }
-
-    /// Entries for a single layer.
-    pub fn layer(&self, layer: Layer) -> impl Iterator<Item = &KeyEntry> {
-        self.entries.iter().filter(move |e| e.layer == layer)
-    }
-
-    /// Remapped entries for a single layer.
-    pub fn layer_remaps(&self, layer: Layer) -> impl Iterator<Item = &KeyEntry> {
-        self.entries
-            .iter()
-            .filter(move |e| e.layer == layer && e.is_remapped)
-    }
-
-    /// Look up a single entry by index and layer.
-    pub fn get(&self, index: u8, layer: Layer) -> Option<&KeyEntry> {
-        self.entries
-            .iter()
-            .find(|e| e.index == index && e.layer == layer)
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Remap detection (shared logic)
 // ---------------------------------------------------------------------------
 
@@ -194,24 +46,6 @@ pub fn is_user_remap(k: &[u8], default_hid_code: u8) -> bool {
 
 /// Number of pages to read for a full key matrix (126 positions × 4 bytes = 504).
 const KEYMATRIX_PAGES: usize = 8;
-
-/// Load the keymap from a connected keyboard.
-pub fn load(keyboard: &KeyboardInterface) -> Result<KeyMap, KeyboardError> {
-    let key_count = keyboard.key_count() as usize;
-    let profile = keyboard.active_profile();
-    let base0 = keyboard.get_keymatrix(profile, 0, KEYMATRIX_PAGES)?;
-    // Layer 1 of profile 0 — this used to read profile 1's layer 0, so Layer1
-    // remaps never showed up: `set_key` writes profile 0 / layer 1.
-    let base1 = keyboard.get_keymatrix(profile, 1, KEYMATRIX_PAGES)?;
-    let fn_layer = keyboard.get_fn_keymatrix(profile, 0, KEYMATRIX_PAGES).ok();
-
-    Ok(KeyMap::from_raw(&RawKeyMapData {
-        base0,
-        base1,
-        fn_layer,
-        key_count,
-    }))
-}
 
 // ---------------------------------------------------------------------------
 // I/O: writing
@@ -330,21 +164,61 @@ pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, Key
     let modtap = kb.get_modtap_times().unwrap_or_default();
     let snaptap = kb.get_snaptap_binds().unwrap_or_default();
 
+    Ok(build_key_rows(&RawKeyRows {
+        key_count,
+        names: (0..key_count)
+            .map(|i| {
+                // Device-resolved names first (profile merged with the matrix DB),
+                // falling back to the generic table. Without this a board's own keys
+                // — the M1 V5's volume encoder at 90/91, say — read as unnamed.
+                let device = kb.matrix_key_name(i);
+                if device.is_empty() {
+                    matrix::key_name(i as u8).to_string()
+                } else {
+                    device.to_string()
+                }
+            })
+            .collect(),
+        layers,
+        fn_layer,
+        triggers: trig,
+        dks_travels,
+        dks_blob,
+        modtap,
+        snaptap,
+    }))
+}
+
+/// Everything `build_key_rows` needs, so the assembly can be tested without a device.
+pub struct RawKeyRows {
+    pub key_count: usize,
+    /// Display name per matrix position; empty means "no physical key here".
+    pub names: Vec<String>,
+    /// Keymatrix layers 0-3.
+    pub layers: [Vec<u8>; 4],
+    pub fn_layer: Option<Vec<u8>>,
+    pub triggers: monsgeek_keyboard::TriggerSettings,
+    pub dks_travels: Vec<u16>,
+    pub dks_blob: Vec<u8>,
+    pub modtap: Vec<u16>,
+    pub snaptap: Vec<u8>,
+}
+
+/// Fuse the raw tables into one row per physical key.
+pub fn build_key_rows(raw: &RawKeyRows) -> Vec<KeyRow> {
+    let key_count = raw.key_count;
+    let layers = &raw.layers;
+    let fn_layer = &raw.fn_layer;
+    let trig = &raw.triggers;
+    let (dks_travels, dks_blob, modtap, snaptap) =
+        (&raw.dks_travels, &raw.dks_blob, &raw.modtap, &raw.snaptap);
+
     let mut rows = Vec::new();
     for i in 0..key_count {
-        // Device-resolved names first (profile merged with the matrix DB), falling
-        // back to the generic table. Without this a board's own keys — the M1 V5's
-        // volume encoder at 90/91, say — read as unnamed.
-        let device_name = kb.matrix_key_name(i);
-        let name = if device_name.is_empty() {
-            matrix::key_name(i as u8)
-        } else {
-            device_name
-        };
+        let name = raw.names.get(i).cloned().unwrap_or_default();
         if name.is_empty() || name == "?" {
             continue;
         }
-        let name = name.to_string();
         let default = default_keycode(i as u8);
         let mode_byte = ModeByte::from_u8(trig.key_modes.get(i).copied().unwrap_or(0));
 
@@ -392,13 +266,13 @@ pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, Key
             fn_raw,
             fn_action,
             dks_travel: dks_travels.get(i).copied().unwrap_or(0),
-            dks_modes: DksConfig::trigger_modes_from_blob(&dks_blob, i),
+            dks_modes: DksConfig::trigger_modes_from_blob(dks_blob, i),
             modtap_ms: modtap.get(i).copied().unwrap_or(0),
             snaptap_partner: (snap != SNAPTAP_UNBOUND && (snap as usize) < key_count)
                 .then_some(snap),
         });
     }
-    Ok(rows)
+    rows
 }
 
 // ---------------------------------------------------------------------------
@@ -500,14 +374,16 @@ mod tests {
         assert_eq!(kr.to_string(), "L1+Caps");
     }
 
-    // -- KeyMap::from_raw --
+    // -- build_key_rows --
 
+    /// Six positions of the real matrix (Esc ` Tab Caps LShf LCtl), so the default
+    /// keycodes and names come out of the same tables the driver uses.
     fn make_raw(
         key_count: usize,
         base0: &[[u8; 4]],
         base1: &[[u8; 4]],
         fn_layer: &[[u8; 4]],
-    ) -> RawKeyMapData {
+    ) -> RawKeyRows {
         let to_vec = |entries: &[[u8; 4]]| -> Vec<u8> {
             let mut v = vec![0u8; key_count * 4];
             for (i, e) in entries.iter().enumerate() {
@@ -517,86 +393,91 @@ mod tests {
             }
             v
         };
-        RawKeyMapData {
-            base0: to_vec(base0),
-            base1: to_vec(base1),
-            fn_layer: if fn_layer.is_empty() {
-                None
-            } else {
-                Some(to_vec(fn_layer))
-            },
+        RawKeyRows {
             key_count,
+            names: (0..key_count)
+                .map(|i| matrix::key_name(i as u8).to_string())
+                .collect(),
+            layers: [
+                to_vec(base0),
+                to_vec(base1),
+                vec![0; key_count * 4],
+                vec![0; key_count * 4],
+            ],
+            fn_layer: (!fn_layer.is_empty()).then(|| to_vec(fn_layer)),
+            triggers: Default::default(),
+            dks_travels: Vec::new(),
+            dks_blob: Vec::new(),
+            modtap: Vec::new(),
+            snaptap: Vec::new(),
         }
     }
 
-    #[test]
-    fn keymap_detects_remap() {
-        // Position 3 = Caps (default 0x39). Remap to A (0x04).
-        let raw = make_raw(
-            6,
-            &[
-                [0, 0, 0x29, 0], // Esc (default)
-                [0, 0, 0x35, 0], // ` (default)
-                [0, 0, 0x2B, 0], // Tab (default)
-                [0, 0, 0x04, 0], // Caps → A (REMAP)
-                [0, 0, 0xE1, 0], // LShf (default)
-                [0, 0, 0xE0, 0], // LCtl (default)
-            ],
-            &[
-                [0, 0, 0x29, 0],
-                [0, 0, 0x35, 0],
-                [0, 0, 0x2B, 0],
-                [0, 0, 0x39, 0], // Caps identity on L1
-                [0, 0, 0xE1, 0],
-                [0, 0, 0xE0, 0],
-            ],
-            &[],
-        );
+    const DEFAULTS: [[u8; 4]; 6] = [
+        [0, 0, 0x29, 0], // Esc
+        [0, 0, 0x35, 0], // `
+        [0, 0, 0x2B, 0], // Tab
+        [0, 0, 0x39, 0], // Caps
+        [0, 0, 0xE1, 0], // LShf
+        [0, 0, 0xE0, 0], // LCtl
+    ];
 
-        let km = KeyMap::from_raw(&raw);
-        let remaps: Vec<_> = km.remaps().collect();
-        assert_eq!(remaps.len(), 1);
-        assert_eq!(remaps[0].index, 3);
-        assert_eq!(remaps[0].layer, Layer::Base);
-        assert_eq!(remaps[0].action, KeyAction::Key(0x04));
+    #[test]
+    fn build_key_rows_flags_only_the_remapped_key() {
+        let mut base0 = DEFAULTS;
+        base0[3] = [0, 0, 0x04, 0]; // Caps -> A
+        let empty = [[0u8; 4]; 6];
+        let rows = build_key_rows(&make_raw(6, &base0, &empty, &[]));
+
+        let remapped: Vec<_> = rows.iter().filter(|r| r.output_remapped[0]).collect();
+        assert_eq!(remapped.len(), 1);
+        assert_eq!(remapped[0].index, 3);
+        assert_eq!(remapped[0].outputs[0], KeyAction::Key(0x04));
+        assert!(rows.iter().all(|r| !r.output_remapped[1]));
+    }
+
+    /// The base layer is judged against the position's factory keycode, but the
+    /// overlay layers have no default at all — anything non-empty there is a
+    /// binding, even if it happens to match the base.
+    #[test]
+    fn overlay_layers_are_set_when_non_empty() {
+        let mut l1 = [[0u8; 4]; 6];
+        l1[3] = DEFAULTS[3]; // Layer1 bound to the same key the base emits
+        let rows = build_key_rows(&make_raw(6, &DEFAULTS, &l1, &[]));
+
+        let caps = rows.iter().find(|r| r.index == 3).unwrap();
+        assert!(!caps.output_remapped[0], "base matches its default");
+        assert!(
+            caps.output_remapped[1],
+            "an explicit overlay entry is a binding"
+        );
     }
 
     #[test]
-    fn keymap_fn_layer_entries() {
-        let raw = make_raw(
-            6,
-            &[
-                [0, 0, 0x29, 0],
-                [0, 0, 0x35, 0],
-                [0, 0, 0x2B, 0],
-                [0, 0, 0x39, 0],
-                [0, 0, 0xE1, 0],
-                [0, 0, 0xE0, 0],
-            ],
-            &[
-                [0, 0, 0x29, 0],
-                [0, 0, 0x35, 0],
-                [0, 0, 0x2B, 0],
-                [0, 0, 0x39, 0],
-                [0, 0, 0xE1, 0],
-                [0, 0, 0xE0, 0],
-            ],
-            &[
-                [0, 0, 0, 0],    // empty
-                [3, 0, 0xE9, 0], // Volume Up
-                [0, 0, 0, 0],    // empty
-                [0, 0, 0, 0],    // empty
-                [0, 0, 0, 0],    // empty
-                [0, 0, 0, 0],    // empty
-            ],
-        );
+    fn build_key_rows_picks_up_fn_bindings() {
+        let mut fn_layer = [[0u8; 4]; 6];
+        fn_layer[3] = [3, 0, 0xE9, 0]; // Fn+Caps -> Volume Up
+        let rows = build_key_rows(&make_raw(6, &DEFAULTS, &DEFAULTS, &fn_layer));
 
-        let km = KeyMap::from_raw(&raw);
-        let fn_entries: Vec<_> = km.layer(Layer::Fn).collect();
-        assert_eq!(fn_entries.len(), 1);
-        assert_eq!(fn_entries[0].index, 1);
-        assert_eq!(fn_entries[0].layer, Layer::Fn);
-        assert_eq!(fn_entries[0].action, KeyAction::Consumer(0x00E9));
+        let caps = rows.iter().find(|r| r.index == 3).unwrap();
+        assert_eq!(caps.fn_action, Some(KeyAction::Consumer(0x00E9)));
+        assert!(caps.is_customized());
+        // Empty Fn slots stay unbound rather than reading as a binding.
+        assert!(rows
+            .iter()
+            .filter(|r| r.index != 3)
+            .all(|r| r.fn_action.is_none()));
+    }
+
+    /// The raw bytes are kept verbatim, since re-encoding moves a lone usage slot.
+    #[test]
+    fn build_key_rows_keeps_device_bytes() {
+        let mut base0 = DEFAULTS;
+        base0[3] = [0, 0x29, 0, 0]; // usage in slot 1, as an older driver wrote it
+        let rows = build_key_rows(&make_raw(6, &base0, &DEFAULTS, &[]));
+        let caps = rows.iter().find(|r| r.index == 3).unwrap();
+        assert_eq!(caps.raw[0], [0, 0x29, 0, 0]);
+        assert_eq!(caps.outputs[0].to_config_bytes(), [0, 0, 0x29, 0]);
     }
 
     // -- is_user_remap (re-tested here for the shared version) --
