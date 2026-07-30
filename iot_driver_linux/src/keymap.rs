@@ -259,7 +259,8 @@ pub fn reset_key(kb: &KeyboardInterface, index: u8, layer: Layer) -> Result<(), 
 #[derive(Debug, Clone)]
 pub struct KeyRow {
     pub index: u8,
-    pub position: &'static str,
+    /// Display name, device-resolved where the profile or matrix DB names it.
+    pub position: String,
     /// Base mode (magnetism subcmd 7). Reinterprets the keymatrix layers:
     /// Normal → `outputs[0]` is the key; DKS → `outputs[0..4]` are the combo slots.
     pub mode: KeyMode,
@@ -277,6 +278,12 @@ pub struct KeyRow {
     pub output_remapped: [bool; 4],
     /// Fn-layer binding (separate table), if non-empty.
     pub fn_action: Option<KeyAction>,
+    /// Raw keymatrix bytes per layer, exactly as the device holds them. Kept
+    /// because re-encoding an action is lossy: `[0,0x29,0,0]` and `[0,0,0x29,0]`
+    /// both decode to `Key(0x29)`.
+    pub raw: [[u8; 4]; 4],
+    /// Raw Fn-table bytes, `None` when the Fn read failed.
+    pub fn_raw: Option<[u8; 4]>,
     /// DKS trigger-point travel, raw u16.
     pub dks_travel: u16,
     /// DKS packed binding-row bytes (4 × 2-bit phase actions each).
@@ -300,7 +307,9 @@ impl KeyRow {
 
 /// Load the fused per-key rows for every physical key. All reads are bulk (no
 /// per-key round-trips); mode-specific tables tolerate failure on older firmware.
-pub fn load_key_rows(kb: &KeyboardInterface) -> Result<Vec<KeyRow>, KeyboardError> {
+///
+/// `sys` selects the Fn table's OS variant (0 = Windows, 1 = Mac).
+pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, KeyboardError> {
     let key_count = kb.key_count() as usize;
 
     // Keymatrix layers 0–3 (outputs / DKS combos) + the separate Fn table.
@@ -310,7 +319,7 @@ pub fn load_key_rows(kb: &KeyboardInterface) -> Result<Vec<KeyRow>, KeyboardErro
         kb.get_keymatrix(0, 2, KEYMATRIX_PAGES)?,
         kb.get_keymatrix(0, 3, KEYMATRIX_PAGES)?,
     ];
-    let fn_layer = kb.get_fn_keymatrix(0, 0, KEYMATRIX_PAGES).ok();
+    let fn_layer = kb.get_fn_keymatrix(0, sys, KEYMATRIX_PAGES).ok();
 
     // Magnetism table + mode-specific bulk reads.
     let trig = kb.get_all_triggers()?;
@@ -321,18 +330,29 @@ pub fn load_key_rows(kb: &KeyboardInterface) -> Result<Vec<KeyRow>, KeyboardErro
 
     let mut rows = Vec::new();
     for i in 0..key_count {
-        let name = matrix::key_name(i as u8);
-        if name == "?" {
+        // Device-resolved names first (profile merged with the matrix DB), falling
+        // back to the generic table. Without this a board's own keys — the M1 V5's
+        // volume encoder at 90/91, say — read as unnamed.
+        let device_name = kb.matrix_key_name(i);
+        let name = if device_name.is_empty() {
+            matrix::key_name(i as u8)
+        } else {
+            device_name
+        };
+        if name.is_empty() || name == "?" {
             continue;
         }
+        let name = name.to_string();
         let default = default_keycode(i as u8);
         let mode_byte = ModeByte::from_u8(trig.key_modes.get(i).copied().unwrap_or(0));
 
         let mut outputs = [KeyAction::Disabled; 4];
         let mut output_remapped = [false; 4];
+        let mut raw = [[0u8; 4]; 4];
         for (l, data) in layers.iter().enumerate() {
             if i * 4 + 4 <= data.len() {
                 let k = &data[i * 4..i * 4 + 4];
+                raw[l] = [k[0], k[1], k[2], k[3]];
                 outputs[l] = KeyAction::from_config_bytes([k[0], k[1], k[2], k[3]]);
                 // Only the base layer has a factory-default keycode; the overlay /
                 // DKS layers count as "set" iff non-empty.
@@ -344,10 +364,13 @@ pub fn load_key_rows(kb: &KeyboardInterface) -> Result<Vec<KeyRow>, KeyboardErro
             }
         }
 
-        let fn_action = fn_layer.as_ref().and_then(|d| {
-            let k = d.get(i * 4..i * 4 + 4)?;
-            (k != [0, 0, 0, 0]).then(|| KeyAction::from_config_bytes([k[0], k[1], k[2], k[3]]))
-        });
+        let fn_raw = fn_layer
+            .as_ref()
+            .and_then(|d| d.get(i * 4..i * 4 + 4))
+            .map(|k| [k[0], k[1], k[2], k[3]]);
+        let fn_action = fn_raw
+            .filter(|k| k != &[0, 0, 0, 0])
+            .map(KeyAction::from_config_bytes);
 
         let snap = snaptap.get(i).copied().unwrap_or(SNAPTAP_UNBOUND);
         rows.push(KeyRow {
@@ -363,6 +386,8 @@ pub fn load_key_rows(kb: &KeyboardInterface) -> Result<Vec<KeyRow>, KeyboardErro
             top_dz: trig.top_deadzone.get(i).copied().unwrap_or(0),
             outputs,
             output_remapped,
+            raw,
+            fn_raw,
             fn_action,
             dks_travel: dks_travels.get(i).copied().unwrap_or(0),
             dks_modes: DksConfig::trigger_modes_from_blob(&dks_blob, i),

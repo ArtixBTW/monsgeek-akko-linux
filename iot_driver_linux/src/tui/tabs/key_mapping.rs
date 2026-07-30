@@ -7,6 +7,7 @@
 
 use ratatui::{prelude::*, widgets::*};
 
+use crate::keyclass::KeyClass;
 use crate::keymap::KeyRow;
 use crate::tui::keys::RemapLayerView;
 use monsgeek_keyboard::{KeyMode, ModeByte};
@@ -52,44 +53,15 @@ impl KmState {
     }
 }
 
-/// Physical key class narrowing. Alphanumeric = a single-character label that is an
-/// ASCII letter or digit (A–Z, 0–9); Other = everything else (Esc, Tab, modifiers,
-/// symbols, navigation, …).
-#[derive(Clone, Copy, PartialEq, Default)]
-pub(in crate::tui) enum KmClass {
-    #[default]
-    All,
-    Alphanumeric,
-    Other,
-}
-
-impl KmClass {
-    pub fn cycle(self) -> Self {
-        match self {
-            Self::All => Self::Alphanumeric,
-            Self::Alphanumeric => Self::Other,
-            Self::Other => Self::All,
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::All => "All",
-            Self::Alphanumeric => "Alnum",
-            Self::Other => "Other",
-        }
-    }
-    /// A key is alphanumeric iff its physical label is exactly one ASCII letter/digit.
-    fn is_alnum(r: &KeyRow) -> bool {
-        let mut chars = r.position.chars();
-        matches!((chars.next(), chars.next()), (Some(c), None) if c.is_ascii_alphanumeric())
-    }
-    pub fn matches(self, r: &KeyRow) -> bool {
-        match self {
-            Self::All => true,
-            Self::Alphanumeric => Self::is_alnum(r),
-            Self::Other => !Self::is_alnum(r),
-        }
-    }
+/// Step the class filter. `None` is the "every class" state, so the cycle is one
+/// longer than the class list.
+fn cycle_class(current: Option<KeyClass>, forward: bool) -> Option<KeyClass> {
+    let n = KeyClass::CONTENT.len() + 1;
+    let at = current.map_or(0, |c| {
+        KeyClass::CONTENT.iter().position(|&k| k == c).unwrap_or(0) + 1
+    });
+    let next = if forward { at + 1 } else { at + n - 1 } % n;
+    (next > 0).then(|| KeyClass::CONTENT[next - 1])
 }
 
 /// Row ordering for the Key Mapping table.
@@ -129,7 +101,8 @@ pub(in crate::tui) struct KeyMappingFilter {
     /// Mode narrowing (None = any).
     pub mode: Option<KeyMode>,
     /// Physical key class (alphanumeric / other).
-    pub class: KmClass,
+    /// `None` = every class.
+    pub class: Option<KeyClass>,
 }
 
 impl Default for KeyMappingFilter {
@@ -138,7 +111,7 @@ impl Default for KeyMappingFilter {
             layer: RemapLayerView::Both,
             state: KmState::All,
             mode: None,
-            class: KmClass::All,
+            class: None,
         }
     }
 }
@@ -156,7 +129,10 @@ impl KeyMappingFilter {
             RemapLayerView::L1 => r.output_remapped[1],
             RemapLayerView::Fn => r.fn_action.is_some(),
         };
-        state_ok && layer_ok && self.class.matches(r) && self.mode.is_none_or(|m| r.mode == m)
+        state_ok
+            && layer_ok
+            && self.class.is_none_or(|c| c.contains(r.index))
+            && self.mode.is_none_or(|m| r.mode == m)
     }
 
     /// True when any narrowing is active.
@@ -164,7 +140,7 @@ impl KeyMappingFilter {
         self.layer != RemapLayerView::Both
             || self.state != KmState::All
             || self.mode.is_some()
-            || self.class != KmClass::All
+            || self.class.is_some()
     }
 
     pub fn mode_label(&self) -> &'static str {
@@ -320,7 +296,9 @@ fn render_key_mapping_list(f: &mut Frame, app: &mut App, area: Rect) {
                 filter.layer.label(),
                 filter.state.label(),
                 filter.mode_label(),
-                filter.class.label(),
+                filter
+                    .class
+                    .map_or_else(|| "All".to_string(), |c| c.label()),
             ),
             filter_style,
         ),
@@ -572,11 +550,17 @@ pub(in crate::tui) fn layout_move(app: &mut App, dcol: i32, drow: i32) {
 pub(in crate::tui) fn render_key_mapping_filter(f: &mut Frame, app: &App, area: Rect) {
     let filter = app.key_mapping_filter;
     let field = app.key_mapping_filter_field;
+    // `KeyClass::label` is owned (Row(n) carries a number), so the whole row set is.
     let rows = [
-        ("Layer", filter.layer.label()),
-        ("State", filter.state.label()),
-        ("Mode", filter.mode_label()),
-        ("Class", filter.class.label()),
+        ("Layer", filter.layer.label().to_string()),
+        ("State", filter.state.label().to_string()),
+        ("Mode", filter.mode_label().to_string()),
+        (
+            "Class",
+            filter
+                .class
+                .map_or_else(|| "All".to_string(), |c| c.label()),
+        ),
     ];
 
     let w = 44u16.min(area.width);
@@ -640,11 +624,7 @@ pub(in crate::tui) fn cycle_filter_field(app: &mut App, forward: bool) {
             let _ = forward;
         }
         _ => {
-            app.key_mapping_filter.class = if forward {
-                app.key_mapping_filter.class.cycle()
-            } else {
-                app.key_mapping_filter.class.cycle().cycle()
-            };
+            app.key_mapping_filter.class = cycle_class(app.key_mapping_filter.class, forward);
         }
     }
     // Keep the selection in range after the visible set changes.
