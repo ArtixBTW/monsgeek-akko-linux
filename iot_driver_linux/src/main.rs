@@ -203,8 +203,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::ResetKey { key, layer }) => {
             commands::with_keyboard(&ctx, |kb| commands::keymap::reset_key(kb, &key, layer))?;
         }
-        Some(Commands::Swap { key1, key2, layer }) => {
-            commands::with_keyboard(&ctx, |kb| commands::keymap::swap(kb, &key1, &key2, layer))?;
+        Some(Commands::Swap {
+            key1,
+            key2,
+            profile,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| commands::keymap::swap(kb, &key1, &key2, profile))?;
         }
         Some(Commands::RemapList { layer, all }) => {
             commands::with_keyboard(&ctx, |kb| commands::keymap::remap_list(kb, layer, all))?;

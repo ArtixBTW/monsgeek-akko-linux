@@ -49,9 +49,9 @@ impl KeyEntry {
 
 /// Raw bytes read from the keyboard, before parsing.
 pub struct RawKeyMapData {
-    /// GET_KEYMATRIX(0) — base layer 0.
+    /// Keymatrix layer 0 (profile 0) — the key's base output.
     pub base0: Vec<u8>,
-    /// GET_KEYMATRIX(1) — base layer 1.
+    /// Keymatrix layer 1 (profile 0) — the Layer1 overlay.
     pub base1: Vec<u8>,
     /// GET_FN — Fn layer (None if read failed).
     pub fn_layer: Option<Vec<u8>>,
@@ -198,8 +198,10 @@ const KEYMATRIX_PAGES: usize = 8;
 /// Load the keymap from a connected keyboard.
 pub fn load(keyboard: &KeyboardInterface) -> Result<KeyMap, KeyboardError> {
     let key_count = keyboard.key_count() as usize;
-    let base0 = keyboard.get_keymatrix(0, KEYMATRIX_PAGES)?;
-    let base1 = keyboard.get_keymatrix(1, KEYMATRIX_PAGES)?;
+    let base0 = keyboard.get_keymatrix(0, 0, KEYMATRIX_PAGES)?;
+    // Layer 1 of profile 0 — this used to read profile 1's layer 0, so Layer1
+    // remaps never showed up: `set_key` writes profile 0 / layer 1.
+    let base1 = keyboard.get_keymatrix(0, 1, KEYMATRIX_PAGES)?;
     let fn_layer = keyboard.get_fn_keymatrix(0, 0, KEYMATRIX_PAGES).ok();
 
     Ok(KeyMap::from_raw(&RawKeyMapData {
@@ -303,10 +305,10 @@ pub fn load_key_rows(kb: &KeyboardInterface) -> Result<Vec<KeyRow>, KeyboardErro
 
     // Keymatrix layers 0–3 (outputs / DKS combos) + the separate Fn table.
     let layers: [Vec<u8>; 4] = [
-        kb.get_keymatrix_with_layer(0, 0, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix_with_layer(0, 1, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix_with_layer(0, 2, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix_with_layer(0, 3, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(0, 0, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(0, 1, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(0, 2, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(0, 3, KEYMATRIX_PAGES)?,
     ];
     let fn_layer = kb.get_fn_keymatrix(0, 0, KEYMATRIX_PAGES).ok();
 

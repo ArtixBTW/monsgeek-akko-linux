@@ -1017,7 +1017,7 @@ impl KeyboardInterface {
         layer: u8,
         key_index: u8,
     ) -> Result<[u8; 4], KeyboardError> {
-        let matrix = self.get_keymatrix_with_layer(profile, layer, 8)?;
+        let matrix = self.get_keymatrix(profile, layer, 8)?;
         let off = key_index as usize * 4;
         if off + 4 > matrix.len() {
             return Err(KeyboardError::InvalidParameter(format!(
@@ -1489,22 +1489,23 @@ impl KeyboardInterface {
 
     // === Key Matrix (Key Remapping) ===
 
-    /// Get key matrix (key remappings) for a profile
+    /// Read a keymatrix layer for a profile.
+    ///
+    /// Both coordinates are explicit on purpose: an earlier `get_keymatrix(profile,
+    /// pages)` wrapper defaulted the layer to 0, and every caller read its surviving
+    /// argument as a layer — so `keymatrix 1` and the keymap loader silently worked
+    /// on profile 1 instead of layer 1.
     ///
     /// # Arguments
     /// * `profile` - Profile index (0-3)
+    /// * `layer` - Keymatrix layer 0-3. Layers 0/1 are the key's Base and Layer1
+    ///   outputs; in DKS mode the firmware reinterprets all four as output slots.
+    ///   The Fn layer is a separate store — see [`get_fn_keymatrix`](Self::get_fn_keymatrix).
     /// * `num_pages` - Number of pages to read (8 for full 126-key matrix)
     ///
     /// # Returns
-    /// Raw key matrix data (4 bytes per key: type, enabled, layer, keycode)
-    pub fn get_keymatrix(&self, profile: u8, num_pages: usize) -> Result<Vec<u8>, KeyboardError> {
-        self.get_keymatrix_with_layer(profile, 0, num_pages)
-    }
-
-    /// Like [`get_keymatrix`](Self::get_keymatrix) but reads a keymatrix
-    /// sub-layer (byte 4 of the GET query — layers 0–3 hold DKS modify-key
-    /// combos in the vendor webapp).
-    pub fn get_keymatrix_with_layer(
+    /// Raw key matrix data (4 bytes per key: `[config_type, b1, b2, b3]`)
+    pub fn get_keymatrix(
         &self,
         profile: u8,
         layer: u8,
@@ -1543,7 +1544,7 @@ impl KeyboardInterface {
 
     /// Read the Fn layer key matrix using GET_FN (0x90).
     ///
-    /// Unlike `get_keymatrix` which reads base/Fn remaps via GET_KEYMATRIX (0x8A),
+    /// Unlike [`get_keymatrix`](Self::get_keymatrix) which reads base remaps via GET_KEYMATRIX (0x8A),
     /// this reads the actual Fn layer bindings (media keys, LED controls, etc.)
     /// via the dedicated GET_FN command.
     ///

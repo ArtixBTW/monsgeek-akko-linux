@@ -353,9 +353,9 @@ pub enum Commands {
         key1: String,
         /// Second key
         key2: String,
-        /// Layer (0-3)
+        /// Profile to swap within (0-3). Swap only ever touches keymatrix layer 0.
         #[arg(short, long, default_value = "0")]
-        layer: u8,
+        profile: u8,
     },
 
     /// List key remappings (non-default bindings)

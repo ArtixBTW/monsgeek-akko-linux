@@ -82,8 +82,11 @@ pub fn reset_key(keyboard: &KeyboardInterface, key: &str, layer: u8) -> CommandR
     Ok(())
 }
 
-/// Swap two keys
-pub fn swap(keyboard: &KeyboardInterface, key1: &str, key2: &str, layer: u8) -> CommandResult {
+/// Swap two keys within a profile.
+///
+/// Only ever touches keymatrix layer 0: `swap_keys` writes through
+/// `set_keymatrix(profile, .., layer: 0)`, so the read must match.
+pub fn swap(keyboard: &KeyboardInterface, key1: &str, key2: &str, profile: u8) -> CommandResult {
     let kr_a: KeyRef = match key1.parse() {
         Ok(kr) => kr,
         Err(msg) => {
@@ -99,7 +102,7 @@ pub fn swap(keyboard: &KeyboardInterface, key1: &str, key2: &str, layer: u8) -> 
         }
     };
 
-    match keyboard.get_keymatrix(layer, 8) {
+    match keyboard.get_keymatrix(profile, 0, 8) {
         Ok(data) => {
             let key_a = kr_a.index;
             let key_b = kr_b.index;
@@ -120,7 +123,7 @@ pub fn swap(keyboard: &KeyboardInterface, key1: &str, key2: &str, layer: u8) -> 
             let action_b = hid::key_name(code_b);
             println!("Swapping {name_a} ({action_a}) <-> {name_b} ({action_b})...");
 
-            match keyboard.swap_keys(layer, key_a, code_a, key_b, code_b) {
+            match keyboard.swap_keys(profile, key_a, code_a, key_b, code_b) {
                 Ok(()) => println!("Keys swapped successfully"),
                 Err(e) => eprintln!("Failed to swap keys: {e}"),
             }
@@ -224,7 +227,7 @@ pub fn fn_layout(keyboard: &KeyboardInterface, sys: &str) -> CommandResult {
 /// Show key matrix mappings
 pub fn keymatrix(keyboard: &KeyboardInterface, layer: u8) -> CommandResult {
     println!("Reading key matrix for layer {layer}...");
-    match keyboard.get_keymatrix(layer, 8) {
+    match keyboard.get_keymatrix(0, layer, 8) {
         Ok(data) => {
             let key_count = keyboard.key_count() as usize;
             println!("\nKey mappings (layer {layer}):");
