@@ -108,7 +108,17 @@ iot_driver set-key-trigger A --actuation 0.3 --mode rt  # Per-key
 iot_driver remap CapsLock Escape  # Remap keys
 iot_driver swap A B               # Swap two keys
 iot_driver remap Fn+A F1          # Remap on Fn layer
-iot_driver remap-list             # Show all remaps
+
+# Listing bindings (customised keys only by default)
+iot_driver keymatrix                      # Every key you have changed
+iot_driver keymatrix --keys alpha,function  # Narrow by class, or by name: w,a,s,d
+iot_driver keymatrix --layer fn             # One layer; --sys mac for the Mac table
+iot_driver keymatrix --unset --raw          # Include defaults, with the device's bytes
+
+# Profiles — the keyboard has four, with independent keymaps
+iot_driver profile                # Which one the board is running
+iot_driver set-profile 1          # Switch the board
+iot_driver --profile 1 keymatrix  # Inspect or edit another profile without switching
 
 # Macros
 iot_driver set-macro F1 "Hello"          # Text macro
@@ -367,7 +377,7 @@ iot_driver_linux/
 
 ### 2026-02-11
 
-- **Key action decoding**: All `config_type` cases decoded from firmware RE — ProfileSwitch, SpecialFn, ConnectionMode, Knob, LedControl. Zero "Unknown" entries in `remap-list`
+- **Key action decoding**: All `config_type` cases decoded from firmware RE — ProfileSwitch, SpecialFn, ConnectionMode, Knob, LedControl. Zero "Unknown" entries in `keymatrix`
 - **LED streaming**: `stream-test` and `stream` commands for real-time per-key RGB via patch protocol
 - **Audio reactive LEDs**: Spectrum and solid-color pulse modes driven by system audio capture
 - **Battery ADC quirk documented**: USB mode drops ADC by 311 counts (18%) due to OTG PHY ground shift
