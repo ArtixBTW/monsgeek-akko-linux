@@ -235,6 +235,10 @@ pub mod matrix {
         "?", "Home", "PgUp", "PgDn", "End", "Right",
     ];
 
+    /// Number of matrix positions the name table covers. Positions beyond this
+    /// exist on some boards (encoders, for one) but have no generic name.
+    pub const KEY_COUNT: u8 = KEY_NAMES.len() as u8;
+
     /// Get key name from matrix position
     pub fn key_name(index: u8) -> &'static str {
         KEY_NAMES.get(index as usize).copied().unwrap_or("?")

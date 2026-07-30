@@ -13,6 +13,7 @@ pub mod flash;
 pub mod hal;
 pub mod hid;
 pub mod key_action;
+pub mod keyclass;
 pub mod keymap;
 pub mod led_stream;
 pub mod macro_seq;
