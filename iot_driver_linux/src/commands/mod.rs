@@ -238,6 +238,80 @@ pub fn open_keyboard(
 }
 
 /// Open a keyboard and run a closure with it.
+/// Restores the board's profile when dropped, on every exit path.
+struct ProfileGuard<'a> {
+    keyboard: &'a monsgeek_keyboard::KeyboardInterface,
+    restore_to: u8,
+}
+
+impl Drop for ProfileGuard<'_> {
+    fn drop(&mut self) {
+        // The magnetism table only reaches flash after two `config_save_apply`
+        // passes, and switching profiles reloads RAM from flash — restoring too
+        // early would discard the write we just made.
+        std::thread::sleep(std::time::Duration::from_millis(MAGNETISM_FLUSH_MS));
+        match self.keyboard.set_profile(self.restore_to) {
+            Ok(()) => {
+                self.keyboard.set_active_profile(self.restore_to);
+                println!("Restored profile {}.", self.restore_to + 1);
+            }
+            Err(e) => eprintln!(
+                "WARNING: could not restore profile {}: {e}\n\
+                 The keyboard is still on another profile — run `iot_driver set-profile {}`.",
+                self.restore_to + 1,
+                self.restore_to
+            ),
+        }
+    }
+}
+
+/// Long enough for the firmware's two-pass magnetism flush to reach flash.
+/// The per-write settle is 250ms; this is the same order, applied once at the end.
+const MAGNETISM_FLUSH_MS: u64 = 400;
+
+/// Like [`with_keyboard`], but for commands whose settings carry no profile on the
+/// wire — triggers, deadzones, DKS, Snap-Tap, Mod-Tap, calibration.
+///
+/// The firmware keys those tables off the *active* profile
+/// (`mag_calibration_load_or_init` reads `FLASH_MAGNETISM + profile * 0x1000`), so
+/// editing another profile means making it active first. That is visible on the
+/// keyboard, so it is announced rather than done quietly, and the original profile
+/// is restored through a guard that also runs on error and panic.
+pub fn with_keyboard_on_profile<F>(ctx: &CmdCtx, f: F) -> CommandResult
+where
+    F: FnOnce(&monsgeek_keyboard::KeyboardInterface) -> CommandResult,
+{
+    let keyboard = match open_keyboard(ctx) {
+        Ok(kb) => kb,
+        Err(e) => {
+            eprintln!("No device found: {e}");
+            return Ok(());
+        }
+    };
+
+    let wanted = keyboard.active_profile();
+    let current = keyboard.get_profile().unwrap_or(wanted);
+    if wanted == current {
+        return f(&keyboard);
+    }
+
+    println!(
+        "Trigger settings are stored per profile but carry no profile in the protocol,\n\
+         so profile {} has to be active while it is edited.",
+        wanted + 1
+    );
+    println!("Switching {} -> {} …", current + 1, wanted + 1);
+    if let Err(e) = keyboard.set_profile(wanted) {
+        eprintln!("Failed to switch to profile {}: {e}", wanted + 1);
+        return Ok(());
+    }
+    let _guard = ProfileGuard {
+        keyboard: &keyboard,
+        restore_to: current,
+    };
+    f(&keyboard)
+}
+
 pub fn with_keyboard<F>(ctx: &CmdCtx, f: F) -> CommandResult
 where
     F: FnOnce(&monsgeek_keyboard::KeyboardInterface) -> CommandResult,

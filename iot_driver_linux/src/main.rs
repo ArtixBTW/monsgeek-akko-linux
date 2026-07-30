@@ -137,25 +137,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // === Trigger Commands ===
         Some(Commands::Calibrate) => {
-            commands::with_keyboard(&ctx, commands::triggers::calibrate)?;
+            commands::with_keyboard_on_profile(&ctx, commands::triggers::calibrate)?;
         }
         Some(Commands::Triggers) => {
-            commands::with_keyboard(&ctx, commands::triggers::triggers)?;
+            commands::with_keyboard_on_profile(&ctx, commands::triggers::triggers)?;
         }
         Some(Commands::SetActuation { mm }) => {
-            commands::with_keyboard(&ctx, |kb| commands::triggers::set_actuation(kb, mm))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_actuation(kb, mm)
+            })?;
         }
         Some(Commands::SetRt { value }) => {
-            commands::with_keyboard(&ctx, |kb| commands::triggers::set_rt(kb, &value))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| commands::triggers::set_rt(kb, &value))?;
         }
         Some(Commands::SetRelease { mm }) => {
-            commands::with_keyboard(&ctx, |kb| commands::triggers::set_release(kb, mm))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| commands::triggers::set_release(kb, mm))?;
         }
         Some(Commands::SetBottomDeadzone { mm }) => {
-            commands::with_keyboard(&ctx, |kb| commands::triggers::set_bottom_deadzone(kb, mm))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_bottom_deadzone(kb, mm)
+            })?;
         }
         Some(Commands::SetTopDeadzone { mm }) => {
-            commands::with_keyboard(&ctx, |kb| commands::triggers::set_top_deadzone(kb, mm))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_top_deadzone(kb, mm)
+            })?;
         }
         Some(Commands::SetKeyTrigger {
             key,
@@ -165,21 +171,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             rt,
         }) => {
             let mode = mode.map(Into::into);
-            commands::with_keyboard(&ctx, |kb| {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
                 commands::triggers::set_key_trigger(kb, key, actuation, release, mode, rt)
             })?;
         }
         Some(Commands::SetModeAll { mode, rt }) => {
             let mode = mode.into();
-            commands::with_keyboard(&ctx, |kb| commands::triggers::set_mode_all(kb, mode, rt))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_mode_all(kb, mode, rt)
+            })?;
         }
         Some(Commands::SetSnaptap { key, with, clear }) => {
-            commands::with_keyboard(&ctx, |kb| {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
                 commands::triggers::set_snaptap(kb, key, with, clear)
             })?;
         }
         Some(Commands::SetModtapTime { key, ms }) => {
-            commands::with_keyboard(&ctx, |kb| commands::triggers::set_modtap_time(kb, key, ms))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::set_modtap_time(kb, key, ms)
+            })?;
         }
         Some(Commands::Dks {
             key,
@@ -188,12 +198,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             slots,
             rt,
         }) => {
-            commands::with_keyboard(&ctx, |kb| {
+            commands::with_keyboard_on_profile(&ctx, |kb| {
                 commands::triggers::dks(kb, key, travel_mm, modes, slots, rt)
             })?;
         }
         Some(Commands::DksRoundtrip { key, op }) => {
-            commands::with_keyboard(&ctx, |kb| commands::triggers::dks_roundtrip(kb, key, &op))?;
+            commands::with_keyboard_on_profile(&ctx, |kb| {
+                commands::triggers::dks_roundtrip(kb, key, &op)
+            })?;
         }
 
         // === Keymap Commands ===
