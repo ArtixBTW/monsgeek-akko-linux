@@ -15,6 +15,7 @@ pub mod hid;
 pub mod key_action;
 pub mod keyclass;
 pub mod keymap;
+pub mod keymatrix_view;
 pub mod led_stream;
 pub mod macro_seq;
 pub mod pcap_analyzer;

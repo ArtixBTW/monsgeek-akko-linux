@@ -3,6 +3,7 @@
 use super::CommandResult;
 use iot_driver::key_action::KeyAction;
 use iot_driver::keymap::{self, KeyRef, Layer};
+use iot_driver::keymatrix_view::{self, ListOptions};
 use iot_driver::protocol::hid;
 use monsgeek_keyboard::KeyboardInterface;
 use monsgeek_transport::protocol::matrix;
@@ -224,35 +225,36 @@ pub fn fn_layout(keyboard: &KeyboardInterface, sys: &str) -> CommandResult {
     Ok(())
 }
 
-/// Show key matrix mappings
-pub fn keymatrix(keyboard: &KeyboardInterface, layer: u8) -> CommandResult {
-    println!("Reading key matrix for layer {layer}...");
-    match keyboard.get_keymatrix(keyboard.active_profile(), layer, 8) {
-        Ok(data) => {
-            let key_count = keyboard.key_count() as usize;
-            println!("\nKey mappings (layer {layer}):");
-            for i in 0..key_count {
-                if i * 4 + 3 >= data.len() {
-                    break;
-                }
-                let k = &data[i * 4..(i + 1) * 4];
-                let pos_name = matrix::key_name(i as u8);
-                let action = KeyAction::from_config_bytes([k[0], k[1], k[2], k[3]]);
-
-                // Skip uninteresting entries (unknown matrix position, default mapping)
-                if pos_name == "?" && action == KeyAction::Disabled {
-                    continue;
-                }
-
-                let detail = if matches!(action, KeyAction::Key(_)) {
-                    format!(" (0x{:02x})", k[2])
-                } else {
-                    format!(" [{:02x} {:02x} {:02x} {:02x}]", k[0], k[1], k[2], k[3])
-                };
-                println!("  {:3} {:<6} -> {action}{detail}", i, pos_name);
-            }
+/// Show per-key bindings across layers.
+pub fn keymatrix(
+    keyboard: &KeyboardInterface,
+    layers: &[crate::cli::LayerArg],
+    unset: bool,
+    keys: &[iot_driver::keyclass::KeySelector],
+    sys: crate::cli::SysArg,
+    raw: bool,
+) -> CommandResult {
+    let rows = match keymap::load_key_rows(keyboard, sys.wire()) {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Failed to read key matrix: {e}");
+            return Ok(());
         }
-        Err(e) => eprintln!("Failed to read key matrix: {e}"),
-    }
+    };
+    // An empty selector list means "every key", which is what resolve() returns —
+    // but pass it through as empty so the renderer skips the per-key filter.
+    let selected = if keys.is_empty() {
+        Vec::new()
+    } else {
+        iot_driver::keyclass::KeySelector::resolve(keys)
+    };
+    let opts = ListOptions {
+        layers: layers.iter().map(|&l| l.into()).collect(),
+        keys: selected,
+        show_unset: unset,
+        raw,
+        travel_factor: keyboard.get_precision().unwrap_or_default().factor() as f32,
+    };
+    print!("{}", keymatrix_view::render(&rows, &opts));
     Ok(())
 }

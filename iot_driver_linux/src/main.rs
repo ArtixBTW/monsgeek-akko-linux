@@ -216,8 +216,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::FnLayout { sys }) => {
             commands::with_keyboard(&ctx, |kb| commands::keymap::fn_layout(kb, &sys))?;
         }
-        Some(Commands::Keymatrix { layer }) => {
-            commands::with_keyboard(&ctx, |kb| commands::keymap::keymatrix(kb, layer))?;
+        Some(Commands::Keymatrix {
+            layer,
+            unset,
+            keys,
+            sys,
+            raw,
+        }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::keymap::keymatrix(kb, &layer, unset, &keys, sys, raw)
+            })?;
         }
 
         // === Macro Commands ===

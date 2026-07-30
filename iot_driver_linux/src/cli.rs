@@ -384,12 +384,26 @@ pub enum Commands {
         sys: String,
     },
 
-    /// Show key matrix mappings
+    /// Show per-key bindings across layers (customised keys only by default)
     #[command(visible_alias = "km")]
     Keymatrix {
-        /// Layer (0-3)
-        #[arg(default_value = "0")]
-        layer: u8,
+        /// Layers to show: base|l0|0, l1|1, fn|2 (comma-separated; default all).
+        /// DKS keys have no Layer1 — their slots 1-3 are outputs, not a layer.
+        #[arg(short, long, value_delimiter = ',', value_name = "LAYER")]
+        layer: Vec<LayerArg>,
+        /// Also show keys and slots that are at their factory default
+        #[arg(short, long)]
+        unset: bool,
+        /// Key selector: classes and/or names, e.g. alpha,function,w,a,s,d.
+        /// Prefix with ! to exclude; #N is a matrix position; N..M a range.
+        #[arg(short, long, value_delimiter = ',', value_name = "SEL")]
+        keys: Vec<iot_driver::keyclass::KeySelector>,
+        /// OS variant of the Fn layer
+        #[arg(long, value_enum, default_value_t = SysArg::Win)]
+        sys: SysArg,
+        /// Append the raw 4-byte config to each row
+        #[arg(long)]
+        raw: bool,
     },
 
     // === Macro Commands ===
@@ -709,6 +723,41 @@ pub enum EffectCommands {
         #[arg(long = "var", short = 'v')]
         vars: Vec<String>,
     },
+}
+
+/// OS variant of the Fn layer. The keyboard stores separate Windows and Mac tables.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum SysArg {
+    Win,
+    Mac,
+}
+
+impl SysArg {
+    pub fn wire(self) -> u8 {
+        match self {
+            Self::Win => 0,
+            Self::Mac => 1,
+        }
+    }
+}
+
+/// `Layer` for clap. `Layer`'s own `FromStr` already accepts `0|l0|base`, `1|l1`,
+/// `2|fn`; this exists so `--help` can enumerate the choices.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub enum LayerArg {
+    Base,
+    L1,
+    Fn,
+}
+
+impl From<LayerArg> for monsgeek_transport::protocol::Layer {
+    fn from(a: LayerArg) -> Self {
+        match a {
+            LayerArg::Base => Self::Base,
+            LayerArg::L1 => Self::Layer1,
+            LayerArg::Fn => Self::Fn,
+        }
+    }
 }
 
 /// Base per-key trigger mode, selectable on the CLI. The Rapid-Trigger flag is
