@@ -36,6 +36,13 @@ pub struct Cli {
     #[arg(short = 'D', long, global = true, value_name = "DEVICE")]
     pub device: Option<String>,
 
+    /// Operate on a specific profile (0-3) instead of the board's active one.
+    /// Reads and writes both target it; the keyboard keeps running whatever
+    /// `profile` reports — use `set-profile` to actually switch.
+    #[arg(short = 'P', long, global = true, value_name = "N",
+          value_parser = clap::value_parser!(u8).range(0..4))]
+    pub profile: Option<u8>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

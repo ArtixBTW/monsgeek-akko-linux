@@ -907,9 +907,12 @@ impl App {
                 std::array::from_fn(|i| KeyAction::from_config_bytes(cfg.bindings[i].config))
             }
             None => std::array::from_fn(|i| {
-                kb.and_then(|kb| kb.get_key_config_at_layer(0, i as u8, key_index as u8).ok())
-                    .map(KeyAction::from_config_bytes)
-                    .unwrap_or(KeyAction::Disabled)
+                kb.and_then(|kb| {
+                    kb.get_key_config_at_layer(kb.active_profile(), i as u8, key_index as u8)
+                        .ok()
+                })
+                .map(KeyAction::from_config_bytes)
+                .unwrap_or(KeyAction::Disabled)
             }),
         };
         let dks = DksEditState {
@@ -925,7 +928,7 @@ impl App {
 
         // The Fn layer is a separate store, so it is always its own read.
         let fn_action = kb
-            .and_then(|kb| kb.get_fn_keymatrix(0, 0, 8).ok())
+            .and_then(|kb| kb.get_fn_keymatrix(kb.active_profile(), 0, 8).ok())
             .and_then(|m| {
                 m.get(key_index * 4..key_index * 4 + 4)
                     .map(|s| KeyAction::from_config_bytes([s[0], s[1], s[2], s[3]]))
@@ -1102,9 +1105,15 @@ impl App {
                                     continue;
                                 }
                                 let res = if layer as u8 == FN_WIRE_LAYER {
-                                    keyboard.set_fn_config(0, key, bytes)
+                                    keyboard.set_fn_config(keyboard.active_profile(), key, bytes)
                                 } else {
-                                    keyboard.set_keymatrix_config(0, key, layer as u8, bytes, true)
+                                    keyboard.set_keymatrix_config(
+                                        keyboard.active_profile(),
+                                        key,
+                                        layer as u8,
+                                        bytes,
+                                        true,
+                                    )
                                 };
                                 if let Err(e) = res {
                                     extra.push(format!("output L{layer}: {e}"));

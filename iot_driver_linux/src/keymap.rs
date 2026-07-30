@@ -198,11 +198,12 @@ const KEYMATRIX_PAGES: usize = 8;
 /// Load the keymap from a connected keyboard.
 pub fn load(keyboard: &KeyboardInterface) -> Result<KeyMap, KeyboardError> {
     let key_count = keyboard.key_count() as usize;
-    let base0 = keyboard.get_keymatrix(0, 0, KEYMATRIX_PAGES)?;
+    let profile = keyboard.active_profile();
+    let base0 = keyboard.get_keymatrix(profile, 0, KEYMATRIX_PAGES)?;
     // Layer 1 of profile 0 — this used to read profile 1's layer 0, so Layer1
     // remaps never showed up: `set_key` writes profile 0 / layer 1.
-    let base1 = keyboard.get_keymatrix(0, 1, KEYMATRIX_PAGES)?;
-    let fn_layer = keyboard.get_fn_keymatrix(0, 0, KEYMATRIX_PAGES).ok();
+    let base1 = keyboard.get_keymatrix(profile, 1, KEYMATRIX_PAGES)?;
+    let fn_layer = keyboard.get_fn_keymatrix(profile, 0, KEYMATRIX_PAGES).ok();
 
     Ok(KeyMap::from_raw(&RawKeyMapData {
         base0,
@@ -225,8 +226,8 @@ pub fn set_key(
 ) -> Result<(), KeyboardError> {
     let config = action.to_config_bytes();
     match layer {
-        Layer::Fn => kb.set_fn_config(0, index, config),
-        _ => kb.set_keymatrix_config(0, index, layer.wire_layer(), config, true),
+        Layer::Fn => kb.set_fn_config(kb.active_profile(), index, config),
+        _ => kb.set_keymatrix_config(kb.active_profile(), index, layer.wire_layer(), config, true),
     }
 }
 
@@ -313,13 +314,14 @@ pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, Key
     let key_count = kb.key_count() as usize;
 
     // Keymatrix layers 0–3 (outputs / DKS combos) + the separate Fn table.
+    let profile = kb.active_profile();
     let layers: [Vec<u8>; 4] = [
-        kb.get_keymatrix(0, 0, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix(0, 1, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix(0, 2, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix(0, 3, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, 0, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, 1, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, 2, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, 3, KEYMATRIX_PAGES)?,
     ];
-    let fn_layer = kb.get_fn_keymatrix(0, sys, KEYMATRIX_PAGES).ok();
+    let fn_layer = kb.get_fn_keymatrix(profile, sys, KEYMATRIX_PAGES).ok();
 
     // Magnetism table + mode-specific bulk reads.
     let trig = kb.get_all_triggers()?;

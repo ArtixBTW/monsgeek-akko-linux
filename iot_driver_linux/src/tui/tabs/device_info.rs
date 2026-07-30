@@ -466,17 +466,32 @@ impl App {
         self.status_msg = format!("Speed: {speed}/4");
     }
 
+    /// Step to the next profile (0-3, wrapping).
+    pub(in crate::tui) fn cycle_profile(&mut self) {
+        self.set_profile((self.info.profile + 1) % 4);
+    }
+
     pub(in crate::tui) fn set_profile(&mut self, profile: u8) {
-        if let Some(ref keyboard) = self.keyboard {
-            if keyboard.set_profile(profile).is_ok() {
-                self.info.profile = profile;
-                self.status_msg = format!("Profile {} active", profile + 1);
-                // Reload device info after profile switch
-                self.load_device_info();
-            } else {
-                self.status_msg = "Failed to set profile".to_string();
-            }
+        let Some(keyboard) = self.keyboard.clone() else {
+            return;
+        };
+        if keyboard.set_profile(profile).is_err() {
+            self.status_msg = "Failed to set profile".to_string();
+            return;
         }
+        self.info.profile = profile;
+        self.status_msg = format!("Profile {} active", profile + 1);
+
+        // Keymaps and triggers are per-profile, so everything read from the old one
+        // is now stale. Retarget the interface, drop the cached rows and re-fetch
+        // rather than showing another profile's bindings under this profile's name.
+        keyboard.set_active_profile(profile);
+        self.loading.key_mapping = LoadState::NotLoaded;
+        self.loading.triggers = LoadState::NotLoaded;
+        self.key_rows.clear();
+        self.triggers = None;
+        self.load_device_info();
+        self.auto_load_tab();
     }
 
     pub(in crate::tui) fn set_color(&mut self, r: u8, g: u8, b: u8) {

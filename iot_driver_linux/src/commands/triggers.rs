@@ -863,7 +863,9 @@ pub fn dks_roundtrip(keyboard: &KeyboardInterface, key: u8, op: &str) -> Command
     match op {
         "travel" => keyboard.set_dks_trigger_point_travel_raw(key, 70)?,
         "modes" => keyboard.set_dks_trigger_modes(key, [0, 0, 0, 0])?,
-        "combo" => keyboard.set_keymatrix_config(0, key, 0, [0; 4], true)?,
+        "combo" => {
+            keyboard.set_keymatrix_config(keyboard.active_profile(), key, 0, [0; 4], true)?
+        }
         "mode-all" => keyboard.set_mode_all(ModeByte::new(KeyMode::Normal, false))?,
         "keytrig" => keyboard.set_key_trigger(&orig_trigger)?,
         _ => {

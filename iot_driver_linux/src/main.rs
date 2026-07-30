@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cli.filter.as_deref(),
         cli.record.as_deref(),
     )?;
-    let ctx = CmdCtx::new(printer_config.clone(), cli.device);
+    let ctx = CmdCtx::new(printer_config.clone(), cli.device, cli.profile);
 
     match cli.command {
         None => {

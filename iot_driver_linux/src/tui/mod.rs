@@ -426,6 +426,10 @@ impl App {
             kb.set_matrix_key_names(names);
         }
 
+        // Per-profile data is read and written against whichever profile the board
+        // is actually running.
+        kb.set_active_profile(kb.get_profile().unwrap_or(0));
+
         // Set non-analog positions from matrix database (encoder/GPIO keys).
         if let Some(matrix) = matrix_db {
             if let Some(positions) = &matrix.non_analog_positions {
@@ -593,6 +597,8 @@ impl App {
                 if let Some(names) = registry.resolve_matrix_key_names(device_id, vid, pid) {
                     kb.set_matrix_key_names(names);
                 }
+
+                kb.set_active_profile(kb.get_profile().unwrap_or(0));
 
                 if let Some(matrix) = matrix_db {
                     if let Some(positions) = &matrix.non_analog_positions {
@@ -1583,6 +1589,9 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                             app.scan_device_picker();
                             app.show_device_picker = true;
                         }
+                        KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.cycle_profile();
+                        }
                         KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(0),
                         KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(1),
                         KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(2),
@@ -1865,6 +1874,18 @@ fn ui(f: &mut Frame, app: &mut App) {
     } else {
         "MonsGeek/Akko Keyboard - Configuration Tool".to_string()
     };
+    let profile_text = if app.connected {
+        format!(" Profile {}/4  ^P ", app.info.profile + 1)
+    } else {
+        String::new()
+    };
+    let title_row = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(10),
+            Constraint::Length(profile_text.len() as u16),
+        ])
+        .split(chunks[0]);
     let title = Paragraph::new(title_text)
         .style(
             Style::default()
@@ -1872,7 +1893,13 @@ fn ui(f: &mut Frame, app: &mut App) {
                 .add_modifier(Modifier::BOLD),
         )
         .alignment(Alignment::Center);
-    f.render_widget(title, chunks[0]);
+    f.render_widget(title, title_row[0]);
+    f.render_widget(
+        Paragraph::new(profile_text)
+            .style(Style::default().fg(Color::Magenta))
+            .alignment(Alignment::Right),
+        title_row[1],
+    );
 
     // Tabs, with a right-aligned navigation hint.
     let tab_hint = format!(" Alt+1-{}: switch tabs ", app.tab_count());

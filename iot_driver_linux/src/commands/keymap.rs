@@ -198,7 +198,7 @@ pub fn fn_layout(keyboard: &KeyboardInterface, sys: &str) -> CommandResult {
         "mac" => 1,
         _ => 0,
     };
-    let data = match keyboard.get_fn_keymatrix(0, sys_code, 8) {
+    let data = match keyboard.get_fn_keymatrix(keyboard.active_profile(), sys_code, 8) {
         Ok(d) => d,
         Err(e) => {
             eprintln!("Failed to read Fn layer: {e}");
@@ -227,7 +227,7 @@ pub fn fn_layout(keyboard: &KeyboardInterface, sys: &str) -> CommandResult {
 /// Show key matrix mappings
 pub fn keymatrix(keyboard: &KeyboardInterface, layer: u8) -> CommandResult {
     println!("Reading key matrix for layer {layer}...");
-    match keyboard.get_keymatrix(0, layer, 8) {
+    match keyboard.get_keymatrix(keyboard.active_profile(), layer, 8) {
         Ok(data) => {
             let key_count = keyboard.key_count() as usize;
             println!("\nKey mappings (layer {layer}):");

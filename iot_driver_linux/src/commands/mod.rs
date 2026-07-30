@@ -44,18 +44,26 @@ use std::sync::Arc;
 pub type CommandResult = Result<(), Box<dyn std::error::Error>>;
 
 /// Command context threaded through all command handlers.
-/// Carries printer config (--monitor) and device selector (--device).
+/// Carries printer config (--monitor), device selector (--device) and the
+/// profile override (--profile).
 #[derive(Clone, Default)]
 pub struct CmdCtx {
     pub printer_config: Option<PrinterConfig>,
     pub device: Option<String>,
+    /// `--profile`: operate on this profile instead of the board's active one.
+    pub profile: Option<u8>,
 }
 
 impl CmdCtx {
-    pub fn new(printer_config: Option<PrinterConfig>, device: Option<String>) -> Self {
+    pub fn new(
+        printer_config: Option<PrinterConfig>,
+        device: Option<String>,
+        profile: Option<u8>,
+    ) -> Self {
         Self {
             printer_config,
             device,
+            profile,
         }
     }
 
@@ -213,6 +221,11 @@ pub fn open_keyboard(
     if let Some(names) = registry.resolve_matrix_key_names(device_id, vid, pid) {
         kb.set_matrix_key_names(names);
     }
+
+    // Keymatrix and Fn operations target the board's active profile unless the
+    // caller overrides it, so a read and the write that follows always agree.
+    let profile = ctx.profile.or_else(|| kb.get_profile().ok()).unwrap_or(0);
+    kb.set_active_profile(profile);
 
     // Set non-analog positions from matrix database (encoder/GPIO keys).
     if let Some(matrix) = matrix_db {

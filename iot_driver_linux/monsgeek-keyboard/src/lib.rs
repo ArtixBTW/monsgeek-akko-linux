@@ -81,6 +81,7 @@ pub struct AnimStatus {
 // Re-export VendorEvent and TimestampedEvent for use by consumers (TUI notification handling)
 pub use monsgeek_transport::{TimestampedEvent, VendorEvent};
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use monsgeek_transport::protocol::{cmd, magnetism as mag_cmd, CommandTable, FN_WIRE_LAYER};
@@ -129,6 +130,14 @@ pub struct KeyboardInterface {
     /// Polling rates this model accepts, from the device database.
     /// Empty means unknown, in which case no restriction is applied.
     polling_rates: Vec<u16>,
+    /// Profile every keymatrix / Fn read and write operates on.
+    ///
+    /// Resolved at connect from the board's own active profile, or forced by the
+    /// caller. Keeping it here rather than passing it per call means a keymap read
+    /// and the write that follows it can't disagree. Atomic because the interface is
+    /// shared behind an `Arc` and the profile changes mid-session when the user
+    /// switches profiles.
+    active_profile: AtomicU8,
     /// Protocol family determines which command byte mapping to use.
     protocol: ProtocolFamily,
     /// Command table for the active protocol family.
@@ -169,9 +178,23 @@ impl KeyboardInterface {
             matrix_key_names: Vec::new(),
             non_analog_positions: Vec::new(),
             polling_rates: Vec::new(),
+            active_profile: AtomicU8::new(0),
             protocol,
             commands: protocol.commands(),
         }
+    }
+
+    /// Set the profile that keymatrix and Fn operations target.
+    ///
+    /// Does not switch the keyboard — see [`set_profile`](Self::set_profile) for that.
+    /// This selects which profile's stored keymap is read and written.
+    pub fn set_active_profile(&self, profile: u8) {
+        self.active_profile.store(profile, Ordering::Relaxed);
+    }
+
+    /// Profile that keymatrix and Fn operations target.
+    pub fn active_profile(&self) -> u8 {
+        self.active_profile.load(Ordering::Relaxed)
     }
 
     /// Set matrix key names from a device profile.
@@ -1043,7 +1066,8 @@ impl KeyboardInterface {
         // type here would silently drop macros/consumer usages on the next write.
         let mut configs = [[0u8; 4]; 4];
         for (layer, config) in configs.iter_mut().enumerate() {
-            *config = self.get_key_config_at_layer(0, layer as u8, key_index)?;
+            *config =
+                self.get_key_config_at_layer(self.active_profile(), layer as u8, key_index)?;
         }
         Ok(DksConfig::from_parts(travel_raw, modes, configs))
     }
@@ -1138,12 +1162,21 @@ impl KeyboardInterface {
         // key (no ROM fallback for the base layer). If the caller left binding 0
         // empty, preserve the key's current layer-0 output instead of zeroing it.
         let mut configs: [[u8; 4]; 4] = std::array::from_fn(|i| config.bindings[i].config);
-        configs[0] = resolve_slot0(configs[0], self.get_key_config_at_layer(0, 0, key_index)?);
+        configs[0] = resolve_slot0(
+            configs[0],
+            self.get_key_config_at_layer(self.active_profile(), 0, key_index)?,
+        );
 
         for (binding, slot) in configs.into_iter().enumerate() {
             // Persist once, on the final binding (commit = flash-dirty + settle).
             let commit = binding == 3;
-            self.set_keymatrix_config(0, key_index, binding as u8, slot, commit)?;
+            self.set_keymatrix_config(
+                self.active_profile(),
+                key_index,
+                binding as u8,
+                slot,
+                commit,
+            )?;
         }
         Ok(())
     }
@@ -1634,8 +1667,8 @@ impl KeyboardInterface {
             0 => Err(KeyboardError::InvalidParameter(
                 "base layer has no ROM fallback; write the factory keycode instead".into(),
             )),
-            FN_WIRE_LAYER => self.set_fn_config(0, key_index, [0, 0, 0, 0]),
-            l => self.set_keymatrix_config(0, key_index, l, [0, 0, 0, 0], true),
+            FN_WIRE_LAYER => self.set_fn_config(self.active_profile(), key_index, [0, 0, 0, 0]),
+            l => self.set_keymatrix_config(self.active_profile(), key_index, l, [0, 0, 0, 0], true),
         }
     }
 
@@ -1827,9 +1860,9 @@ impl KeyboardInterface {
     ) -> Result<(), KeyboardError> {
         let config = [9, macro_type, macro_index, 0];
         if layer == FN_WIRE_LAYER {
-            self.set_fn_config(0, key_index, config)
+            self.set_fn_config(self.active_profile(), key_index, config)
         } else {
-            self.set_keymatrix_config(0, key_index, layer, config, true)
+            self.set_keymatrix_config(self.active_profile(), key_index, layer, config, true)
         }
     }
 
