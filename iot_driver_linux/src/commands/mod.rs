@@ -216,6 +216,9 @@ pub fn open_keyboard(
     if let Some(names) = registry.resolve_matrix_key_names(device_id, vid, pid) {
         kb.set_matrix_key_names(names);
     }
+    if let Some(m) = matrix_db {
+        kb.set_matrix_defaults(m.matrix.clone());
+    }
 
     // Keymatrix and Fn operations target the board's active profile unless the
     // caller overrides it, so a read and the write that follows always agree.

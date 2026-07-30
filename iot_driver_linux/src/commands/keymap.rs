@@ -6,7 +6,6 @@ use iot_driver::keymap::{self, KeyRef, Layer};
 use iot_driver::keymatrix_view::{self, ListOptions};
 use iot_driver::protocol::hid;
 use monsgeek_keyboard::KeyboardInterface;
-use monsgeek_transport::protocol::matrix;
 
 /// Remap a key.
 ///
@@ -118,8 +117,8 @@ pub fn swap(keyboard: &KeyboardInterface, key1: &str, key2: &str, profile: u8) -
                 0
             };
 
-            let name_a = matrix::key_name(key_a);
-            let name_b = matrix::key_name(key_b);
+            let name_a = keyboard.matrix_key_name(key_a as usize);
+            let name_b = keyboard.matrix_key_name(key_b as usize);
             let action_a = hid::key_name(code_a);
             let action_b = hid::key_name(code_b);
             println!("Swapping {name_a} ({action_a}) <-> {name_b} ({action_b})...");

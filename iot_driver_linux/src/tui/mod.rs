@@ -402,6 +402,9 @@ impl App {
         if let Some(names) = registry.resolve_matrix_key_names(device_id, vid, pid) {
             kb.set_matrix_key_names(names);
         }
+        if let Some(m) = matrix_db {
+            kb.set_matrix_defaults(m.matrix.clone());
+        }
 
         // Per-profile data is read and written against whichever profile the board
         // is actually running.
@@ -575,6 +578,9 @@ impl App {
 
                 if let Some(names) = registry.resolve_matrix_key_names(device_id, vid, pid) {
                     kb.set_matrix_key_names(names);
+                }
+                if let Some(m) = matrix_db {
+                    kb.set_matrix_defaults(m.matrix.clone());
                 }
 
                 kb.set_active_profile(kb.get_profile().unwrap_or(0));

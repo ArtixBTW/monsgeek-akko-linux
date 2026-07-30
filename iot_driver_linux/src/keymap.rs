@@ -65,9 +65,24 @@ pub fn set_key(
     }
 }
 
-/// Factory-default HID keycode for a matrix position, derived from its name.
+/// Factory-default HID keycode for a matrix position, derived from the *generic*
+/// matrix name table.
+///
+/// Only correct for boards that match that table. Prefer
+/// [`device_default_keycode`], which consults the device's own layout first.
 pub fn default_keycode(index: u8) -> u8 {
     hid::key_code_from_name(matrix::key_name(index)).unwrap_or(0)
+}
+
+/// Factory-default HID keycode for a matrix position on *this* device.
+///
+/// The device database carries a per-model default table; without it a board whose
+/// layout differs from the generic one has every differing key read as customised
+/// (the Womier SK75 has LMeta where the generic table has LAlt, and End where it
+/// has Home).
+pub fn device_default_keycode(kb: &KeyboardInterface, index: u8) -> u8 {
+    kb.matrix_default(index as usize)
+        .unwrap_or_else(|| default_keycode(index))
 }
 
 /// Reset a key to its firmware default.
@@ -79,7 +94,7 @@ pub fn default_keycode(index: u8) -> u8 {
 /// base, so zeros are the correct "default" there.
 pub fn reset_key(kb: &KeyboardInterface, index: u8, layer: Layer) -> Result<(), KeyboardError> {
     match layer {
-        Layer::Base => kb.set_keymatrix(0, index, default_keycode(index), true, 0),
+        Layer::Base => kb.set_keymatrix(0, index, device_default_keycode(kb, index), true, 0),
         Layer::Layer1 | Layer::Fn => kb.reset_key(layer.wire_layer(), index),
     }
 }
@@ -179,6 +194,9 @@ pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, Key
                 }
             })
             .collect(),
+        defaults: (0..key_count)
+            .map(|i| device_default_keycode(kb, i as u8))
+            .collect(),
         layers,
         fn_layer,
         triggers: trig,
@@ -194,6 +212,8 @@ pub struct RawKeyRows {
     pub key_count: usize,
     /// Display name per matrix position; empty means "no physical key here".
     pub names: Vec<String>,
+    /// Factory keycode per matrix position, for deciding what counts as customised.
+    pub defaults: Vec<u8>,
     /// Keymatrix layers 0-3.
     pub layers: [Vec<u8>; 4],
     pub fn_layer: Option<Vec<u8>>,
@@ -219,7 +239,7 @@ pub fn build_key_rows(raw: &RawKeyRows) -> Vec<KeyRow> {
         if name.is_empty() || name == "?" {
             continue;
         }
-        let default = default_keycode(i as u8);
+        let default = raw.defaults.get(i).copied().unwrap_or(0);
         let mode_byte = ModeByte::from_u8(trig.key_modes.get(i).copied().unwrap_or(0));
 
         let mut outputs = [KeyAction::Disabled; 4];
@@ -398,6 +418,7 @@ mod tests {
             names: (0..key_count)
                 .map(|i| matrix::key_name(i as u8).to_string())
                 .collect(),
+            defaults: (0..key_count).map(|i| default_keycode(i as u8)).collect(),
             layers: [
                 to_vec(base0),
                 to_vec(base1),
@@ -478,6 +499,20 @@ mod tests {
         let caps = rows.iter().find(|r| r.index == 3).unwrap();
         assert_eq!(caps.raw[0], [0, 0x29, 0, 0]);
         assert_eq!(caps.outputs[0].to_config_bytes(), [0, 0, 0x29, 0]);
+    }
+
+    /// A board whose layout differs from the generic table needs its own defaults,
+    /// or every differing key reads as customised. The Womier SK75 has LMeta where
+    /// the generic table has LAlt (0xE3 vs 0xE2) and End where it has Home.
+    #[test]
+    fn device_defaults_decide_what_counts_as_customised() {
+        // Generic table's answer for those positions, which is wrong for the SK75.
+        assert_eq!(default_keycode(17), 0xE2, "generic table says LAlt");
+
+        // Holding the device's real default is not a customisation...
+        assert!(!is_user_remap(&[0, 0, 0xE3, 0], 0xE3));
+        // ...but judging it against the generic table's default says it is.
+        assert!(is_user_remap(&[0, 0, 0xE3, 0], default_keycode(17)));
     }
 
     // -- is_user_remap (re-tested here for the shared version) --

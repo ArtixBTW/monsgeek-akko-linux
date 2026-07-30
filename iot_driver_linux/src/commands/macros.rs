@@ -144,7 +144,7 @@ pub fn assign_macro(
         return Ok(());
     };
 
-    let key_name = matrix::key_name(key_index);
+    let key_name = keyboard.matrix_key_name(key_index as usize);
     let layer_num: u8 = if fn_layer { 1 } else { 0 };
     let prefix = if fn_layer { "Fn+" } else { "" };
     println!("Assigning macro {macro_index} to {prefix}{key_name} (index {key_index})...");

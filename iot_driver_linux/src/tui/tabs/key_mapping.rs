@@ -236,7 +236,11 @@ fn output_text(row: &KeyRow, view: RemapLayerView) -> String {
 }
 
 /// Mode-specific "Extra" cell (DKS travel + active combos / ModTap time / SnapTap).
-fn extra_text(row: &KeyRow, factor: f32) -> String {
+///
+/// `names` are the device-resolved position names, needed for the Snap-Tap partner:
+/// it is another key's matrix index, and the generic table misnames it on boards
+/// whose layout differs.
+fn extra_text(row: &KeyRow, factor: f32, names: &[String]) -> String {
     match row.mode {
         KeyMode::DynamicKeystroke => {
             let travel = format!("↧{:.2}mm", row.dks_travel as f32 / factor);
@@ -256,7 +260,13 @@ fn extra_text(row: &KeyRow, factor: f32) -> String {
         KeyMode::ModTap => format!("{}ms", row.modtap_ms),
         KeyMode::SnapTap => row
             .snaptap_partner
-            .map(|p| format!("↔{}", matrix::key_name(p)))
+            .map(|p| {
+                let name = names.get(p as usize).filter(|n| !n.is_empty());
+                match name {
+                    Some(n) => format!("↔{n}"),
+                    None => format!("↔{}", matrix::key_name(p)),
+                }
+            })
             .unwrap_or_else(|| "unbound".into()),
         _ => "·".into(),
     }
@@ -351,7 +361,7 @@ fn render_key_mapping_list(f: &mut Frame, app: &mut App, area: Rect) {
                 output_text(r, RemapLayerView::Fn),
                 format!("{:.2}", r.actuation as f32 / factor),
                 format!("{:.2}", r.release as f32 / factor),
-                extra_text(r, factor),
+                extra_text(r, factor, &app.matrix_key_names),
             ];
             (texts, r.is_customized(), r.mode)
         })
@@ -504,7 +514,7 @@ fn render_key_mapping_layout(f: &mut Frame, app: &mut App, area: Rect) {
                 output_text(r, filter.layer),
                 r.actuation as f32 / factor,
                 r.release as f32 / factor,
-                extra_text(r, factor),
+                extra_text(r, factor, &app.matrix_key_names),
             )),
         ])
     } else {

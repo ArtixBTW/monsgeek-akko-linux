@@ -125,6 +125,9 @@ pub struct KeyboardInterface {
     has_magnetism: bool,
     /// Key names indexed by matrix position. Empty string = no physical key at that position.
     matrix_key_names: Vec<String>,
+    /// Factory HID keycode per matrix position, from the device database. Empty when
+    /// unknown, in which case callers fall back to deriving it from the position name.
+    matrix_defaults: Vec<u8>,
     /// Matrix positions that are non-analog (GPIO/encoder, not magnetic switches).
     non_analog_positions: Vec<u8>,
     /// Polling rates this model accepts, from the device database.
@@ -176,6 +179,7 @@ impl KeyboardInterface {
             key_count,
             has_magnetism,
             matrix_key_names: Vec::new(),
+            matrix_defaults: Vec::new(),
             non_analog_positions: Vec::new(),
             polling_rates: Vec::new(),
             active_profile: AtomicU8::new(0),
@@ -200,6 +204,25 @@ impl KeyboardInterface {
     /// Set matrix key names from a device profile.
     pub fn set_matrix_key_names(&mut self, names: Vec<String>) {
         self.matrix_key_names = names;
+    }
+
+    /// Set the factory keycode per matrix position from the device database.
+    pub fn set_matrix_defaults(&mut self, defaults: Vec<u8>) {
+        self.matrix_defaults = defaults;
+    }
+
+    /// Factory HID keycode for a matrix position, or `None` when this device's
+    /// layout is not in the database.
+    ///
+    /// Deriving it from the position's name only works when the board matches the
+    /// generic matrix; boards that differ (the Womier SK75 has LMeta where the
+    /// generic table has LAlt) need their own table, or every such key reads as
+    /// customised.
+    pub fn matrix_default(&self, position: usize) -> Option<u8> {
+        self.matrix_defaults
+            .get(position)
+            .copied()
+            .filter(|&c| c != 0)
     }
 
     /// Get the display name for a matrix position.
