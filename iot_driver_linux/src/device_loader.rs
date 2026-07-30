@@ -336,13 +336,52 @@ impl JsonDeviceMatrix {
     /// Get the number of analog (magnetic) key positions.
     /// Excludes empty positions and non-analog positions.
     pub fn analog_key_count(&self) -> usize {
-        let total_keys = self.matrix.iter().filter(|&&h| h != 0).count();
+        // HID usages below 0x04 are reserved error codes, never real keys. Some
+        // entries carry them as placeholders (the M1 V5 has two at 96/97), and
+        // counting those inflated the total.
+        let real_keys = self.matrix.iter().filter(|&&h| h >= 0x04).count();
         let non_analog = self
             .non_analog_positions
             .as_ref()
             .map(|p| p.len())
             .unwrap_or(0);
-        total_keys.saturating_sub(non_analog)
+        real_keys.saturating_sub(non_analog)
+    }
+}
+
+/// How many matrix positions to scan for a device.
+///
+/// The vendor's key count is a count of *keys*, which is smaller than the matrix
+/// the firmware addresses — the matrix is sparse and its tail can hold encoders and
+/// placeholders. Buffers and scan loops must cover every position the board uses, so
+/// the vendor figure is widened to the matrix extent.
+pub fn scan_extent(db_key_count: u8, matrix: Option<&JsonDeviceMatrix>) -> u8 {
+    let extent = matrix.map_or(0, |m| m.matrix_size() as u8);
+    if db_key_count == 0 || db_key_count < extent {
+        // Fall back to the vendor count when there is no matrix entry at all.
+        if extent > 0 {
+            return extent;
+        }
+    }
+    db_key_count
+}
+
+/// Number of keys to show a user: the vendor's logical count, falling back to the
+/// matrix's analog count and then its extent, so unknown devices still show something.
+pub fn display_key_count(db_key_count: u8, matrix: Option<&JsonDeviceMatrix>) -> u8 {
+    if db_key_count > 0 {
+        return db_key_count;
+    }
+    match matrix {
+        Some(m) => {
+            let analog = m.analog_key_count() as u8;
+            if analog > 0 {
+                analog
+            } else {
+                m.matrix_size() as u8
+            }
+        }
+        None => 0,
     }
 }
 
@@ -956,6 +995,85 @@ mod tests {
         let dev = db.find_by_id(-100).unwrap();
         assert_eq!(dev.display_name, "Help Device");
         assert!(dev.company.is_none());
+    }
+
+    /// Sparse matrix: 90 occupied positions (extent 90), of which 2 are the encoder
+    /// → 88 analog switches. Uses a real usage (0x04 = "A") because placeholder
+    /// codes below 0x04 are deliberately not counted as keys.
+    fn sample_matrix() -> JsonDeviceMatrix {
+        JsonDeviceMatrix {
+            name: "test".into(),
+            display_name: "Test".into(),
+            vid: 0x3151,
+            pid: 0x5030,
+            key_layout_name: None,
+            key_count: 88,
+            match_method: "driverClass".into(),
+            matrix: vec![0x04u8; 90],
+            key_names: vec![None; 90],
+            non_analog_positions: Some(vec![88, 89]),
+        }
+    }
+
+    /// The TAC75 case: show the vendor's 83, but size buffers to the 90-position grid.
+    #[test]
+    fn vendor_count_is_displayed_while_the_scan_covers_the_matrix() {
+        let m = sample_matrix();
+        assert_eq!(scan_extent(83, Some(&m)), 90);
+        assert_eq!(display_key_count(83, Some(&m)), 83);
+    }
+
+    /// With no vendor entry, show the analog switch count — never the padded extent.
+    #[test]
+    fn unknown_vendor_count_falls_back_to_analog() {
+        let m = sample_matrix();
+        assert_eq!(scan_extent(0, Some(&m)), 90);
+        assert_eq!(display_key_count(0, Some(&m)), 88);
+    }
+
+    /// Placeholder entries below usage 0x04 are not keys.
+    #[test]
+    fn analog_count_ignores_invalid_usages() {
+        let mut m = sample_matrix();
+        m.matrix[10] = 1; // HID 1 = ErrorRollOver, a placeholder
+        m.matrix[11] = 2;
+        assert_eq!(m.analog_key_count(), 86);
+    }
+
+    /// The M1 V5 is the case that made these three numbers worth separating:
+    /// 82 physical inputs, 85 named positions, a scan extent of 98.
+    #[test]
+    fn key_counts_are_three_different_numbers() {
+        let db = DeviceDatabase::load_from_file("../data/device_matrices.json")
+            .or_else(|_| DeviceDatabase::load_from_file("data/device_matrices.json"));
+        let Ok(db) = db else {
+            return; // matrix DB not present in this checkout
+        };
+        let Some(m) = db.get_matrix(0x3151, 0x5030, 2949) else {
+            return;
+        };
+        assert_eq!(m.matrix_size(), 98, "scan extent");
+        // 81 magnetic switches: named positions less the encoder and the two
+        // placeholder entries whose HID codes are not valid usages.
+        assert_eq!(m.analog_key_count(), 81, "analog switches");
+        assert_eq!(
+            scan_extent(82, Some(m)),
+            98,
+            "vendor count widens to the matrix"
+        );
+        assert_eq!(
+            display_key_count(82, Some(m)),
+            82,
+            "vendor count is what users see"
+        );
+    }
+
+    /// With no matrix entry there is nothing to widen to.
+    #[test]
+    fn scan_extent_falls_back_to_the_vendor_count() {
+        assert_eq!(scan_extent(82, None), 82);
+        assert_eq!(display_key_count(82, None), 82);
+        assert_eq!(scan_extent(0, None), 0);
     }
 
     #[test]

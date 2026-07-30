@@ -189,7 +189,7 @@ pub fn open_keyboard(
     let info = flow.device_info();
     let (vid, pid) = (info.vid, info.pid);
     let device_id = query_device_id(&flow);
-    let mut key_count = iot_driver::devices::key_count_with_id(device_id, vid, pid);
+    let db_key_count = iot_driver::devices::key_count_with_id(device_id, vid, pid);
     let has_magnetism = iot_driver::devices::has_magnetism_with_id(device_id, vid, pid);
     let device_info = iot_driver::devices::get_device_info_with_id(device_id, vid, pid);
     let protocol = monsgeek_transport::protocol::ProtocolFamily::detect(
@@ -202,12 +202,7 @@ pub fn open_keyboard(
     // Try matrix database for key names and matrix size (covers 390+ devices).
     // This is the generic path — no hardcoded profile needed.
     let matrix_db = device_id.and_then(|id| registry.get_device_matrix(vid, pid, id));
-    if let Some(matrix) = matrix_db {
-        let matrix_size = matrix.matrix_size() as u8;
-        if key_count == 0 || (key_count < matrix_size && matrix_size > 0) {
-            key_count = matrix_size;
-        }
-    }
+    let key_count = iot_driver::device_loader::scan_extent(db_key_count, matrix_db);
 
     let mut kb =
         monsgeek_keyboard::KeyboardInterface::new(flow, key_count, has_magnetism, protocol);
