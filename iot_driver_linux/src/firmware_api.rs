@@ -153,17 +153,6 @@ impl FirmwareVersions {
             .iter()
             .any(|&(_, new, old)| new.is_some() && old.is_some() && new > old)
     }
-
-    /// Get list of available updates
-    pub fn get_updates(&self, current: &FirmwareVersions) -> Vec<(String, u16, u16)> {
-        self.field_pairs(current)
-            .iter()
-            .filter_map(|&(name, new, old)| {
-                let (new, old) = (new?, old?);
-                (new > old).then(|| (name.to_string(), old, new))
-            })
-            .collect()
-    }
 }
 
 /// API response for firmware version check

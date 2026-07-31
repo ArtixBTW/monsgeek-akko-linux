@@ -365,14 +365,6 @@ impl PowerSupplyManager {
     pub fn find(&self, name: &str) -> Option<&PowerSupply> {
         self.supplies.iter().find(|ps| ps.name() == name)
     }
-
-    /// Update all power supplies
-    pub fn sync_all(&self) -> io::Result<()> {
-        for ps in &self.supplies {
-            ps.sync_to_files()?;
-        }
-        Ok(())
-    }
 }
 
 impl Default for PowerSupplyManager {

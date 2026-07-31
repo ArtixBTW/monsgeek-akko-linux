@@ -47,38 +47,6 @@ impl AkkoBpfLoader {
         }
     }
 
-    /// Create loader using default paths (system or local)
-    pub fn with_default_path() -> Result<Self> {
-        // Try system path first, then local dev path
-        let path = if Path::new(DEFAULT_BPF_PATH).exists() {
-            PathBuf::from(DEFAULT_BPF_PATH)
-        } else if Path::new(DEV_BPF_PATH).exists() {
-            PathBuf::from(DEV_BPF_PATH)
-        } else {
-            // Try relative to executable
-            let exe_dir = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.to_path_buf()));
-
-            if let Some(dir) = exe_dir {
-                let local_path = dir.join("bpf/akko_dongle.bpf.o");
-                if local_path.exists() {
-                    local_path
-                } else {
-                    return Err(anyhow!(
-                        "BPF object not found. Looked in:\n  - {DEFAULT_BPF_PATH}\n  - {DEV_BPF_PATH}\nRun 'make' in bpf/ directory first."
-                    ));
-                }
-            } else {
-                return Err(anyhow!(
-                    "BPF object not found at {DEFAULT_BPF_PATH} or {DEV_BPF_PATH}"
-                ));
-            }
-        };
-
-        Ok(Self::new(path))
-    }
-
     /// Find the Akko dongle HID device in sysfs
     pub fn find_dongle() -> Option<PathBuf> {
         let hid_devices = Path::new("/sys/bus/hid/devices");
@@ -105,12 +73,6 @@ impl AkkoBpfLoader {
         }
 
         None
-    }
-
-    /// Check if BPF is already loaded for the dongle
-    pub fn is_loaded(&self) -> bool {
-        // Check if power_supply entry exists (indicates BPF is working)
-        Self::find_power_supply().is_some()
     }
 
     /// Find the kernel power_supply entry for the dongle

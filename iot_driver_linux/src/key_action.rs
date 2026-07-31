@@ -267,19 +267,6 @@ impl KeyAction {
             },
         }
     }
-
-    /// The usage this action is "about": the first non-modifier slot, falling back
-    /// to the first live slot. A chord has no single canonical key on the wire — all
-    /// its slots are pressed — so this is for labelling and lookup only.
-    pub fn primary_usage(&self) -> Option<HidUsage> {
-        let keys: &[HidUsage] = match self {
-            KeyAction::Key(code) => return Some(*code),
-            KeyAction::Combo { keys } => keys,
-            _ => return None,
-        };
-        let live = || keys.iter().copied().filter(|&u| u.is_live());
-        live().find(|u| !u.is_modifier()).or_else(|| live().next())
-    }
 }
 
 impl fmt::Display for KeyAction {

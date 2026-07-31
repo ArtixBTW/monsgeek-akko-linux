@@ -33,10 +33,6 @@ pub struct PatchInfo {
 }
 
 impl PatchInfo {
-    pub fn has_battery(&self) -> bool {
-        self.capabilities & 0x01 != 0
-    }
-
     pub fn has_led_stream(&self) -> bool {
         self.capabilities & 0x02 != 0
     }
@@ -144,9 +140,8 @@ pub struct KeyboardInterface {
     /// shared behind an `Arc` and the profile changes mid-session when the user
     /// switches profiles.
     active_profile: AtomicU8,
-    /// Protocol family determines which command byte mapping to use.
-    protocol: ProtocolFamily,
-    /// Command table for the active protocol family.
+    /// Command table for the active protocol family. The `ProtocolFamily` itself
+    /// is not kept — it is only ever consulted to pick this table.
     commands: &'static CommandTable,
 }
 
@@ -186,7 +181,6 @@ impl KeyboardInterface {
             non_analog_positions: Vec::new(),
             polling_rates: Vec::new(),
             active_profile: AtomicU8::new(0),
-            protocol,
             commands: protocol.commands(),
         }
     }
@@ -294,11 +288,6 @@ impl KeyboardInterface {
     /// Check if keyboard has magnetism (Hall Effect) support
     pub fn has_magnetism(&self) -> bool {
         self.has_magnetism
-    }
-
-    /// Get the protocol family
-    pub fn protocol_family(&self) -> ProtocolFamily {
-        self.protocol
     }
 
     /// Check if using wireless transport
@@ -768,26 +757,6 @@ impl KeyboardInterface {
             })),
             _ => Ok(None),
         }
-    }
-
-    /// Poll for vendor notifications (non-blocking with timeout)
-    ///
-    /// Returns any EP2 vendor event from the keyboard, including:
-    /// - Profile changes (Fn+F9..F12)
-    /// - LED settings (brightness, effect, speed, color)
-    /// - Keyboard functions (Win lock, WASD swap)
-    /// - Key depth events (during magnetism monitoring)
-    /// - Settings acknowledgments
-    /// - Wake events
-    ///
-    /// This is useful for real-time TUI updates when the user changes
-    /// settings via the keyboard's Fn key combinations.
-    ///
-    /// Returns None on timeout (no event within timeout_ms)
-    pub fn poll_notification(&self, timeout_ms: u32) -> Result<Option<VendorEvent>, KeyboardError> {
-        self.transport
-            .read_event(timeout_ms)
-            .map_err(KeyboardError::Transport)
     }
 
     /// Get trigger settings for a specific key.

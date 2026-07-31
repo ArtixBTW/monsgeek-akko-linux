@@ -85,31 +85,6 @@ impl BatteryInfo {
         })
     }
 
-    /// Parse battery info from vendor input event (legacy format)
-    /// Format (speculative, from firmware analysis):
-    /// - byte[0] = 0x88 (status marker)
-    /// - byte[3] = battery level (1-100)
-    /// - byte[4] = flags (bit 0 = online, bit 1 = charging)
-    pub fn from_vendor_event(data: &[u8]) -> Option<Self> {
-        // Skip report ID if present
-        let cmd_data = if data.first() == Some(&0x05) && data.len() > 1 {
-            &data[1..]
-        } else {
-            data
-        };
-
-        if cmd_data.len() < 5 || cmd_data[0] != 0x88 {
-            return None;
-        }
-
-        Some(Self {
-            level: cmd_data[3],
-            online: cmd_data[4] & 0x01 != 0,
-            charging: cmd_data[4] & 0x02 != 0,
-            idle: false, // Not available in vendor event format
-        })
-    }
-
     /// Check if this is valid battery data (not wired/unknown)
     pub fn is_valid(&self) -> bool {
         self.level <= 100

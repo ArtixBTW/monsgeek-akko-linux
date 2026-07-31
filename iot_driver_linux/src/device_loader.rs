@@ -99,11 +99,6 @@ impl JsonDeviceDefinition {
         false
     }
 
-    /// Get the company name, falling back to "Unknown" if not set
-    pub fn company_or_unknown(&self) -> &str {
-        self.company.as_deref().unwrap_or("Unknown")
-    }
-
     /// Get key name for a matrix position index
     pub fn key_name(&self, index: usize) -> Option<&'static str> {
         let matrix = self.matrix_defaults.as_ref()?;
@@ -121,16 +116,6 @@ impl JsonDeviceDefinition {
         let matrix = self.matrix_defaults.as_ref()?;
         let target_hid = crate::protocol::hid::key_code_from_name(name)?;
         matrix.iter().position(|&hid| hid == target_hid.get())
-    }
-
-    /// Get all key indices for WASD keys
-    pub fn wasd_indices(&self) -> Option<(usize, usize, usize, usize)> {
-        Some((
-            self.key_index("W")?,
-            self.key_index("A")?,
-            self.key_index("S")?,
-            self.key_index("D")?,
-        ))
     }
 
     /// Polling rates this model accepts, fastest first.
@@ -647,11 +632,6 @@ impl DeviceDatabase {
             .unwrap_or_default()
     }
 
-    /// Get all unique companies
-    pub fn get_companies(&self) -> Vec<&str> {
-        self.devices_by_company.keys().map(|s| s.as_str()).collect()
-    }
-
     /// Get all devices
     pub fn all_devices(&self) -> impl Iterator<Item = &JsonDeviceDefinition> {
         self.devices.iter()
@@ -665,11 +645,6 @@ impl DeviceDatabase {
     /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.devices.is_empty()
-    }
-
-    /// Get all unique VID/PID combinations
-    pub fn get_all_vid_pids(&self) -> Vec<(u16, u16)> {
-        self.devices_by_vid_pid.keys().cloned().collect()
     }
 
     /// Check if VID/PID is in database
@@ -734,11 +709,6 @@ impl DeviceDatabase {
     ) -> Option<u8> {
         self.get_matrix(vid, pid, device_id)
             .and_then(|m| m.hid_code(position))
-    }
-
-    /// Get number of loaded matrices
-    pub fn matrices_len(&self) -> usize {
-        self.matrices.values().map(Vec::len).sum()
     }
 }
 

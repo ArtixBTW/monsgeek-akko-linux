@@ -10,7 +10,7 @@ use std::sync::Arc;
 use monsgeek_keyboard::{AnimDefStatus, AnimStatus, KeyboardInterface};
 use monsgeek_transport::protocol::{DefId, LedPos, StripIdx};
 
-use crate::effect::{self, CompiledAnim, ResolvedEffect};
+use crate::effect::{CompiledAnim, ResolvedEffect};
 
 /// Firmware animation tick rate in Hz (~100 Hz blend rate).
 pub const TICK_RATE_HZ: f64 = 100.0;
@@ -107,22 +107,6 @@ impl EngineSnapshot {
     /// Active animation definition slots.
     pub fn defs(&self) -> &[AnimDefStatus] {
         &self.raw.defs
-    }
-
-    /// Duration of one animation cycle in milliseconds.
-    pub fn def_duration_ms(def: &AnimDefStatus) -> f64 {
-        def.duration_ticks as f64 * MS_PER_TICK
-    }
-
-    /// Current phase position (0.0-1.0) within the animation cycle,
-    /// derived from the global frame_count. Each key's actual phase
-    /// is offset by its phase_offset.
-    pub fn def_phase(&self, def: &AnimDefStatus) -> f64 {
-        if def.duration_ticks == 0 {
-            return 0.0;
-        }
-        let elapsed = self.raw.frame_count % def.duration_ticks as u32;
-        elapsed as f64 / def.duration_ticks as f64
     }
 }
 
@@ -252,30 +236,6 @@ impl AnimEngine {
         })
     }
 
-    /// Program a pre-compiled animation.
-    pub fn program_compiled(
-        &self,
-        def_id: DefId,
-        compiled: &CompiledAnim,
-        keys: &[(LedPos, u8)],
-    ) -> Result<(), String> {
-        self.kb
-            .anim_define(
-                def_id,
-                compiled.flags,
-                compiled.priority,
-                compiled.duration_ticks,
-                &compiled.keyframes,
-            )
-            .map_err(|e| format!("anim_define: {e}"))?;
-
-        self.kb
-            .anim_assign(def_id, keys)
-            .map_err(|e| format!("anim_assign: {e}"))?;
-
-        Ok(())
-    }
-
     /// Cancel a specific animation slot.
     pub fn cancel(&self, def_id: DefId) -> Result<(), String> {
         self.kb
@@ -307,21 +267,4 @@ pub fn query_status(kb: &KeyboardInterface) -> Result<EngineSnapshot, String> {
 pub fn ms_to_phase_offset(ms: f64) -> u8 {
     let ticks = ms / MS_PER_TICK;
     (ticks / 8.0).round().clamp(0.0, 255.0) as u8
-}
-
-/// Resolve an effect by name from the library with variables, then compile.
-pub fn compile_effect(
-    lib: &effect::EffectLibrary,
-    name: &str,
-    vars: &std::collections::BTreeMap<String, String>,
-    priority: i8,
-    one_shot: bool,
-) -> Result<CompiledAnim, String> {
-    let def = lib
-        .get(name)
-        .ok_or_else(|| format!("unknown effect: {name}"))?;
-    let resolved = effect::resolve(def, vars)?;
-    resolved
-        .compile_for_firmware(priority, one_shot)
-        .ok_or_else(|| "effect has no keyframes".to_string())
 }

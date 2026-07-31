@@ -1103,25 +1103,6 @@ pub mod music_viz {
             }
         }
     }
-
-    /// Encode music mode option byte
-    /// option = (style << 4) | dazzle_flag
-    pub fn encode_option(style: u8, dazzle: bool) -> u8 {
-        let dazzle_flag = if dazzle {
-            super::LED_DAZZLE_ON
-        } else {
-            super::LED_DAZZLE_OFF
-        };
-        (style << 4) | dazzle_flag
-    }
-
-    /// Decode music mode option byte
-    /// Returns (style, dazzle)
-    pub fn decode_option(option: u8) -> (u8, bool) {
-        let style = option >> 4;
-        let dazzle = (option & super::LED_OPTIONS_MASK) == super::LED_DAZZLE_ON;
-        (style, dazzle)
-    }
 }
 
 /// Audio visualizer protocol (command 0x0D)
@@ -1160,25 +1141,6 @@ pub mod audio_viz {
             buf[8 + i] = level.min(MAX_LEVEL);
         }
         buf
-    }
-
-    /// Convert FFT magnitudes to band levels (0-6)
-    /// `magnitudes` should be normalized 0.0-1.0
-    pub fn magnitudes_to_bands(magnitudes: &[f32]) -> [u8; NUM_BANDS] {
-        let mut bands = [0u8; NUM_BANDS];
-        let step = magnitudes.len() / NUM_BANDS;
-
-        for (i, band) in bands.iter_mut().enumerate() {
-            // Average magnitudes for this band
-            let start = i * step;
-            let end = (start + step).min(magnitudes.len());
-            if start < end {
-                let avg: f32 = magnitudes[start..end].iter().sum::<f32>() / (end - start) as f32;
-                // Map 0.0-1.0 to 0-6
-                *band = (avg * MAX_LEVEL as f32).round().min(MAX_LEVEL as f32) as u8;
-            }
-        }
-        bands
     }
 
     /// Pack 16 band levels into the nibble format the firmware's **non-USB**
