@@ -178,7 +178,6 @@ fn section_target(out: &mut String, ctx: &CmdCtx) {
             let version = u16::from_le_bytes([resp[7], resp[8]]);
             device_id = Some(id);
             let _ = writeln!(out, "- device id: {id} (0x{id:08X})");
-            // Decimal, not high/low byte: raw 1032 is v10.32, not v4.08.
             let _ = writeln!(
                 out,
                 "- firmware: {} (raw 0x{version:04X}, dec {version})",

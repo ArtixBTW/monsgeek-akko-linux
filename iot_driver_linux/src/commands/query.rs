@@ -28,7 +28,6 @@ pub fn info(ctx: &CmdCtx) -> CommandResult {
     let device_id = u32::from_le_bytes([resp[1], resp[2], resp[3], resp[4]]);
     let version = u16::from_le_bytes([resp[7], resp[8]]);
 
-    // Decimal, not high/low byte: raw 1032 is v10.32, not v4.08.
     println!(
         "Firmware:  {} (raw 0x{version:04X}, dec {version})",
         FirmwareVersion::new(version).format()

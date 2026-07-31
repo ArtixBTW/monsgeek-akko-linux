@@ -102,7 +102,8 @@ impl Precision {
 /// Firmware version information
 #[derive(Debug, Clone, Default)]
 pub struct FirmwareVersion {
-    /// Version as raw u16 (e.g., 1029 for v10.29)
+    /// Packed version word: major in the high byte, minor in the low byte.
+    /// e.g. 0x0408 = v408. The 0x8F handler sends minor first, then major.
     pub raw: u16,
 }
 
@@ -138,9 +139,17 @@ impl FirmwareVersion {
         self.precision().as_str()
     }
 
-    /// Format as human-readable string (e.g., "v10.29" for raw=1029)
+    /// Format the way the vendor names firmware: `"v408"` for raw `0x0408`.
+    ///
+    /// The word is packed major/minor — high byte 4, low byte 8 — and the two
+    /// are written together without a separator, matching the release archives
+    /// (`..._KB_V407_...`, `..._KB_V408`) and the images in `firmwares/`
+    /// (`v300`, `v316`, `v405`, `v407`, `v408`).
+    ///
+    /// Reading the word as a decimal number instead renders `0x0408` as
+    /// "v10.32", which is how this used to print.
     pub fn format(&self) -> String {
-        format!("v{}.{:02}", self.raw / 100, self.raw % 100)
+        format!("v{}{:02}", self.raw >> 8, self.raw & 0xFF)
     }
 
     /// Format as major.minor.patch (e.g., "4.0.5" for raw=0x405)
