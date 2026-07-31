@@ -6,10 +6,11 @@
 //! to add support or debug. Every query is wrapped so a failure appends a
 //! `timeout/error` line and the report still completes.
 
-use super::{open_preferred_transport, resolve_device, CmdCtx, CommandResult};
+use super::{CmdCtx, CommandResult, open_preferred_transport, resolve_device};
 use iot_driver::protocol::patch_info;
-use monsgeek_transport::protocol::cmd;
+use monsgeek_keyboard::settings::FirmwareVersion;
 use monsgeek_transport::protocol::ProtocolFamily;
+use monsgeek_transport::protocol::cmd;
 use monsgeek_transport::{ChecksumType, FlowControlTransport, HidDiscovery, Transport};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -177,11 +178,11 @@ fn section_target(out: &mut String, ctx: &CmdCtx) {
             let version = u16::from_le_bytes([resp[7], resp[8]]);
             device_id = Some(id);
             let _ = writeln!(out, "- device id: {id} (0x{id:08X})");
+            // Decimal, not high/low byte: raw 1032 is v10.32, not v4.08.
             let _ = writeln!(
                 out,
-                "- firmware: v{}.{:02} (raw 0x{version:04X})",
-                version >> 8,
-                version & 0xFF
+                "- firmware: {} (raw 0x{version:04X}, dec {version})",
+                FirmwareVersion::new(version).format()
             );
             let _ = writeln!(out, "- GET_USB_VERSION (0x8F): `{}`", hex(&resp));
         }
@@ -242,14 +243,14 @@ fn section_target(out: &mut String, ctx: &CmdCtx) {
             if let Some(layers) = info.layer_count {
                 let _ = writeln!(out, "- layers: {layers}");
             }
-            if let Some(id) = device_id {
-                if let Some(def) = iot_driver::profile_registry().get_device_info_by_id(id as i32) {
-                    if let Some(layout) = &def.key_layout_name {
-                        let _ = writeln!(out, "- key layout: {layout}");
-                    }
-                    if let Some(chip) = &def.chip_family {
-                        let _ = writeln!(out, "- chip family: {chip}");
-                    }
+            if let Some(id) = device_id
+                && let Some(def) = iot_driver::profile_registry().get_device_info_by_id(id as i32)
+            {
+                if let Some(layout) = &def.key_layout_name {
+                    let _ = writeln!(out, "- key layout: {layout}");
+                }
+                if let Some(chip) = &def.chip_family {
+                    let _ = writeln!(out, "- chip family: {chip}");
                 }
             }
         }

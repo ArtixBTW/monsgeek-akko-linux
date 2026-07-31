@@ -1,10 +1,11 @@
 //! Query (read-only) command handlers.
 
-use super::{format_command_response, open_preferred_transport, CmdCtx, CommandResult};
+use super::{CmdCtx, CommandResult, format_command_response, open_preferred_transport};
 use hidapi::HidApi;
 use iot_driver::hal;
 use iot_driver::protocol::{self, cmd};
 use monsgeek_keyboard::SleepTimeSettings;
+use monsgeek_keyboard::settings::FirmwareVersion;
 use monsgeek_transport::protocol::cmd as transport_cmd;
 use monsgeek_transport::{ChecksumType, Transport};
 use std::time::Duration;
@@ -27,9 +28,11 @@ pub fn info(ctx: &CmdCtx) -> CommandResult {
     let device_id = u32::from_le_bytes([resp[1], resp[2], resp[3], resp[4]]);
     let version = u16::from_le_bytes([resp[7], resp[8]]);
 
-    // Version is stored as major.minor in high/low byte (e.g. 0x0407 = v4.07)
-    let (major, minor) = (version >> 8, version & 0xFF);
-    println!("Firmware:  v{major}.{minor:02} (raw 0x{version:04X}, dec {version})");
+    // Decimal, not high/low byte: raw 1032 is v10.32, not v4.08.
+    println!(
+        "Firmware:  {} (raw 0x{version:04X}, dec {version})",
+        FirmwareVersion::new(version).format()
+    );
     println!("Device ID: {device_id} (0x{device_id:08X})");
 
     // Protocol family
@@ -306,33 +309,31 @@ pub fn battery(
 
     loop {
         // Check for kernel power_supply (eBPF filter loaded) unless --vendor flag
-        if !force_vendor {
-            if let Some(path) = find_dongle_battery_power_supply() {
-                if quiet {
-                    if let Some(info) = read_kernel_battery(&path) {
-                        println!("{}", info.level);
-                    } else {
-                        eprintln!("Failed to read battery");
-                        std::process::exit(1);
-                    }
+        if !force_vendor && let Some(path) = find_dongle_battery_power_supply() {
+            if quiet {
+                if let Some(info) = read_kernel_battery(&path) {
+                    println!("{}", info.level);
                 } else {
-                    println!("Battery Status (kernel)");
-                    println!("-----------------------");
-                    println!("  Source: {}", path.display());
-                    if let Some(info) = read_kernel_battery(&path) {
-                        println!("  Level:     {}%", info.level);
-                        println!("  Connected: {}", if info.online { "Yes" } else { "No" });
-                        println!("  Charging:  {}", if info.charging { "Yes" } else { "No" });
-                    } else {
-                        println!("  Failed to read battery status");
-                    }
+                    eprintln!("Failed to read battery");
+                    std::process::exit(1);
                 }
-                if watch_interval.is_none() {
-                    return Ok(());
+            } else {
+                println!("Battery Status (kernel)");
+                println!("-----------------------");
+                println!("  Source: {}", path.display());
+                if let Some(info) = read_kernel_battery(&path) {
+                    println!("  Level:     {}%", info.level);
+                    println!("  Connected: {}", if info.online { "Yes" } else { "No" });
+                    println!("  Charging:  {}", if info.charging { "Yes" } else { "No" });
+                } else {
+                    println!("  Failed to read battery status");
                 }
-                std::thread::sleep(Duration::from_secs(watch_interval.unwrap()));
-                continue;
             }
+            if watch_interval.is_none() {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_secs(watch_interval.unwrap()));
+            continue;
         }
 
         // Use vendor protocol (direct HID)
