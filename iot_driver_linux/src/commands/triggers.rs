@@ -9,8 +9,7 @@ use monsgeek_keyboard::{
 use monsgeek_transport::protocol::KeymatrixLayer;
 use std::collections::{BTreeSet, HashSet};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 /// Stop calibration with retry (keyboard can be sluggish in cal mode).
@@ -57,14 +56,10 @@ pub fn calibrate(keyboard: &KeyboardInterface) -> CommandResult {
     };
     let real_count = real_keys.len();
 
-    // Set up Ctrl+C handler
-    let interrupted = Arc::new(AtomicBool::new(false));
-    let int_clone = interrupted.clone();
-    if let Err(e) = ctrlc::set_handler(move || {
-        int_clone.store(true, Ordering::SeqCst);
-    }) {
-        eprintln!("Warning: Could not set Ctrl+C handler: {e}");
-    }
+    // The process-wide Ctrl-C flag, shared with the profile guard: a handler can
+    // only be installed once, and installing a second one here would leave this
+    // loop polling something nothing ever sets.
+    let running = super::setup_interrupt_handler();
 
     println!("Starting calibration for {real_count} keys ({positions} matrix positions)...");
     if !has_key_names {
@@ -86,7 +81,7 @@ pub fn calibrate(keyboard: &KeyboardInterface) -> CommandResult {
 
     // Show countdown (check for interrupt)
     for i in (1..=2).rev() {
-        if interrupted.load(Ordering::SeqCst) {
+        if !running.load(Ordering::SeqCst) {
             println!("\n\nAborted during min calibration.");
             let _ = keyboard.calibrate_min(false);
             return Ok(());
@@ -122,7 +117,7 @@ pub fn calibrate(keyboard: &KeyboardInterface) -> CommandResult {
 
     loop {
         // Check for Ctrl+C (abort without saving)
-        if interrupted.load(Ordering::SeqCst) {
+        if !running.load(Ordering::SeqCst) {
             stop_calibration(keyboard);
             println!("\n\nCalibration aborted (not saved).");
             restore_input(&input);

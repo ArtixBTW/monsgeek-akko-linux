@@ -39,7 +39,7 @@ use monsgeek_transport::{
     PrinterConfig, Transport,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Result type for command handlers
 pub type CommandResult = Result<(), Box<dyn std::error::Error>>;
@@ -246,13 +246,30 @@ struct ProfileGuard<'a> {
     restore_to: Profile,
 }
 
+impl<'a> ProfileGuard<'a> {
+    fn new(keyboard: &'a monsgeek_keyboard::KeyboardInterface, restore_to: Profile) -> Self {
+        *PENDING_PROFILE_RESTORE.lock().unwrap() = Some(restore_to);
+        Self {
+            keyboard,
+            restore_to,
+        }
+    }
+}
+
 impl Drop for ProfileGuard<'_> {
     fn drop(&mut self) {
         // The magnetism table only reaches flash after two `config_save_apply`
         // passes, and switching profiles reloads RAM from flash — restoring too
         // early would discard the write we just made.
+        //
+        // The pending marker stays set across this sleep on purpose: it is the
+        // longest stretch where the board is still on the wrong profile, so a
+        // forced exit here is exactly when the user needs to be told.
         std::thread::sleep(std::time::Duration::from_millis(MAGNETISM_FLUSH_MS));
-        match self.keyboard.set_profile(self.restore_to) {
+        let result = self.keyboard.set_profile(self.restore_to);
+        // Cleared only once the board is actually back, or is beyond helping.
+        *PENDING_PROFILE_RESTORE.lock().unwrap() = None;
+        match result {
             Ok(()) => {
                 self.keyboard.set_active_profile(self.restore_to);
                 println!("Restored profile {}.", self.restore_to.number());
@@ -307,10 +324,11 @@ where
         eprintln!("Failed to switch to profile {}: {e}", wanted.number());
         return Ok(());
     }
-    let _guard = ProfileGuard {
-        keyboard: &keyboard,
-        restore_to: current,
-    };
+    // Installed before the guard exists: with a handler in place Ctrl-C no longer
+    // kills the process outright, so the closure unwinds and `Drop` gets to run.
+    // Without it the profile switch announced above would simply be left in place.
+    setup_interrupt_handler();
+    let _guard = ProfileGuard::new(&keyboard, current);
     f(&keyboard)
 }
 
@@ -405,18 +423,49 @@ pub fn format_command_response(cmd_byte: u8, resp: &[u8]) {
     }
 }
 
-/// Set up a Ctrl-C handler that sets the given flag to false when triggered.
-/// Returns the Arc<AtomicBool> for use in the main loop.
+/// Profile the keyboard must be put back on, if a command switched it.
+///
+/// Set while a [`ProfileGuard`] is alive so the Ctrl-C path can name it: a forced
+/// exit skips `Drop`, and a keyboard left on the wrong profile looks like the
+/// user's settings vanished.
+static PENDING_PROFILE_RESTORE: Mutex<Option<Profile>> = Mutex::new(None);
+
+/// The process-wide "keep running" flag, `false` once Ctrl-C has been pressed.
+///
+/// `ctrlc::set_handler` may only be installed once per process, so every caller
+/// shares this one flag. Previously each command installed its own; only the
+/// first succeeded, and any later one polled a flag nothing would ever clear.
+static INTERRUPT_FLAG: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+
+/// Shared Ctrl-C flag, installing the handler on first use.
+///
+/// The handler only clears the flag — it does no I/O, since it runs concurrently
+/// with whatever the main thread is doing on the USB device. That means the
+/// current operation finishes and unwinds normally, which is what lets
+/// [`ProfileGuard`] restore the profile. A second Ctrl-C gives up on that and
+/// exits, printing the command needed to undo the switch by hand.
 pub fn setup_interrupt_handler() -> Arc<AtomicBool> {
-    let running = Arc::new(AtomicBool::new(true));
-    let running_clone = Arc::clone(&running);
-
-    ctrlc::set_handler(move || {
-        running_clone.store(false, Ordering::SeqCst);
-    })
-    .ok();
-
-    running
+    Arc::clone(INTERRUPT_FLAG.get_or_init(|| {
+        let running = Arc::new(AtomicBool::new(true));
+        let flag = Arc::clone(&running);
+        ctrlc::set_handler(move || {
+            if flag.swap(false, Ordering::SeqCst) {
+                eprintln!("\nInterrupted — finishing the current operation…");
+                return;
+            }
+            // Second Ctrl-C: the user wants out now.
+            if let Some(profile) = PENDING_PROFILE_RESTORE.lock().unwrap().take() {
+                eprintln!(
+                    "Exiting without restoring the profile.\n\
+                     The keyboard is on another profile — run `iot_driver set-profile {}`.",
+                    profile.get()
+                );
+            }
+            std::process::exit(130); // 128 + SIGINT
+        })
+        .ok();
+        running
+    }))
 }
 
 /// Create printer config from CLI flags.
