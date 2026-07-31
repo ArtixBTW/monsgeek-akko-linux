@@ -1523,7 +1523,10 @@ impl KeyboardInterface {
                 Ok(resp) => {
                     all_data.extend_from_slice(&resp);
                 }
-                Err(_) => continue,
+                // Never skip a page. Callers index this buffer by `key_index * 4`,
+                // so dropping 64 bytes mid-stream slides every later key's binding
+                // onto the wrong key — and it still looks like a successful read.
+                Err(e) => return Err(e.into()),
             }
         }
 
@@ -1568,7 +1571,8 @@ impl KeyboardInterface {
                 Ok(resp) => {
                     all_data.extend_from_slice(&resp);
                 }
-                Err(_) => continue,
+                // Same offset hazard as `get_keymatrix`.
+                Err(e) => return Err(e.into()),
             }
         }
 
@@ -1698,7 +1702,9 @@ impl KeyboardInterface {
                         break;
                     }
                 }
-                Err(_) => continue,
+                // A skipped page shifts the rest of the macro, and the shifted
+                // bytes then parse as a plausible-but-wrong keystroke sequence.
+                Err(e) => return Err(e.into()),
             }
         }
 
