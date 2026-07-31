@@ -103,8 +103,16 @@ mod special_fn {
     pub const FN_LOCK: u8 = 0x0c;
     /// Toggle flags2 bit 1 — 6KRO<->NKRO report select; clears reports; BT notify.
     pub const REPORT_MODE: u8 = 0x0d;
-    /// Toggle flags2 bit 2 — downstream effect not yet traced; BT notify.
-    pub const FLAGS2_BIT2: u8 = 0x0e;
+    /// Toggle flags2 bit 2 — switches which pair of keymatrix entries the encoder's
+    /// rotation drives; BT notify.
+    ///
+    /// `encoder_knob_dispatch` (v407 @ 0x08019fdc) reads rotation from positions
+    /// 90/91 and offsets both by `+0x18` (six positions, to 96/97) while this bit is
+    /// set; the knob's click is *not* offset. On the M1 V5 TMR that turns the knob
+    /// from volume (consumer 0xE9/0xEA at 90/91) into LED brightness (LED_CONTROL
+    /// b1=2 at 96/97), and the click — matrix position 92, which holds this very
+    /// sub-function — is what flips between them.
+    pub const KNOB_MODE_TOGGLE: u8 = 0x0e;
     // sub 0xf-0x16: no-op
     /// Sets g_action_key_state bit 0x80 while held (webapp labels this an "AI/DeepSeek" key;
     /// firmware just latches the held-state bit — consumer not fully traced).
@@ -315,7 +323,7 @@ impl fmt::Display for KeyAction {
                     special_fn::NKRO_TOGGLE => "NKRO Toggle",
                     special_fn::FN_LOCK => "Fn Lock",
                     special_fn::REPORT_MODE => "Report Mode",
-                    special_fn::FLAGS2_BIT2 => "SpecialFn(0x0e)",
+                    special_fn::KNOB_MODE_TOGGLE => "Knob Mode Toggle",
                     special_fn::RCTRL_MOD => "RCtrl Modifier",
                     _ => return write!(f, "SpecialFn({sub},{b2},{b3})"),
                 };

@@ -47,6 +47,10 @@ pub fn is_user_remap(k: &[u8], default_hid_code: HidUsage) -> bool {
 /// Number of pages to read for a full key matrix (126 positions × 4 bytes = 504).
 const KEYMATRIX_PAGES: usize = 8;
 
+/// Positions in the firmware's keymatrix array. The 8 pages we read cover 128;
+/// the last two are past the end of the array.
+const MATRIX_POSITIONS: usize = 126;
+
 // ---------------------------------------------------------------------------
 // I/O: writing
 // ---------------------------------------------------------------------------
@@ -173,7 +177,11 @@ impl KeyRow {
 ///
 /// `sys` selects the Fn table's OS variant (0 = Windows, 1 = Mac).
 pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, KeyboardError> {
-    let key_count = kb.matrix_positions() as usize;
+    // Every position the firmware's keymatrix array holds, not just the ones the
+    // device database names. The encoder's mode toggle sits at 92 and its
+    // alternate rotation bindings at 96/97 — all unnamed, and all invisible while
+    // this walked `0..matrix_positions()`.
+    let key_count = MATRIX_POSITIONS;
 
     // Keymatrix layers 0–3 (outputs / DKS combos) + the separate Fn table.
     let profile = kb.active_profile();
@@ -199,11 +207,15 @@ pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, Key
                 // Device-resolved names first (profile merged with the matrix DB),
                 // falling back to the generic table. Without this a board's own keys
                 // — the M1 V5's volume encoder at 90/91, say — read as unnamed.
+                // "?" is the no-name marker in both tables, so it must not win here
+                // or the row gets an unaddressable label.
                 let device = kb.matrix_key_name(i);
-                if device.is_empty() {
-                    matrix::key_name(MatrixPos::new(i as u8)).to_string()
-                } else {
-                    device.to_string()
+                if !device.is_empty() && device != "?" {
+                    return device.to_string();
+                }
+                match matrix::key_name(MatrixPos::new(i as u8)) {
+                    "?" => format!("#{i}"),
+                    generic => generic.to_string(),
                 }
             })
             .collect(),
@@ -248,8 +260,20 @@ pub fn build_key_rows(raw: &RawKeyRows) -> Vec<KeyRow> {
 
     let mut rows = Vec::new();
     for i in 0..key_count {
-        let name = raw.names.get(i).cloned().unwrap_or_default();
-        if name.is_empty() || name == "?" {
+        let name = raw.names.get(i).cloned().unwrap_or_else(|| format!("#{i}"));
+        // A position the database does not name is still real storage. Drop it only
+        // when it is also entirely empty — those are the matrix's physical gaps.
+        // Filtering on the name alone hid the encoder's mode toggle and its
+        // alternate bindings, which are unnamed but very much set.
+        let unnamed = name.starts_with('#');
+        let empty = layers
+            .iter()
+            .all(|d| d.get(i * 4..i * 4 + 4).is_none_or(|k| k == [0, 0, 0, 0]))
+            && fn_layer
+                .as_ref()
+                .and_then(|d| d.get(i * 4..i * 4 + 4))
+                .is_none_or(|k| k == [0, 0, 0, 0]);
+        if unnamed && empty {
             continue;
         }
         let default = raw.defaults.get(i).copied().unwrap_or(HidUsage::NONE);
