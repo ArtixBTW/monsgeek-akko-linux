@@ -467,3 +467,45 @@ fn macro_set_and_readback() {
         Err(e) => eprintln!("  Read error: {e}"),
     }
 }
+
+/// The LED grid ↔ WS2812 strip asymmetry, against real firmware.
+///
+/// `anim_assign` speaks [`LedPos`] (the 16×6 grid, `row * 16 + col`) while
+/// `anim_query_keys` answers in [`StripIdx`] (wiring order). The firmware does
+/// the conversion, so a round-trip has to come back through
+/// `StripIdx::to_led_pos`. A unit test can only check that table's shape; this
+/// checks it is the conversion the firmware actually performs.
+#[test]
+#[ignore] // requires hardware running the patch (0xEA animation engine)
+fn assigned_grid_cells_survive_the_strip_round_trip() {
+    use monsgeek_transport::protocol::LedPos;
+    use std::collections::BTreeSet;
+
+    let (_t, kb) = open_keyboard();
+
+    // Four adjacent QWERTY-row cells — contiguous in the grid, but not on the strip.
+    let expected: BTreeSet<LedPos> = [34, 35, 36, 37].into_iter().map(LedPos::new).collect();
+
+    let def_id = 6;
+    // The firmware drops assignments to a def with no keyframes, so define first:
+    // one keyframe, solid, looping.
+    kb.anim_define(def_id, 0x01, 0, 100, &[(0, 0x00FF, 0)])
+        .expect("anim_define");
+    let keys: Vec<(LedPos, u8)> = expected.iter().map(|&p| (p, 0)).collect();
+    kb.anim_assign(def_id, &keys).expect("anim_assign");
+    std::thread::sleep(Duration::from_millis(50));
+
+    let read_back: BTreeSet<LedPos> = kb
+        .anim_query_keys(def_id)
+        .expect("anim_query_keys")
+        .into_iter()
+        .filter_map(|(strip, _)| strip.to_led_pos())
+        .collect();
+
+    kb.anim_cancel(def_id).ok();
+
+    assert_eq!(
+        read_back, expected,
+        "grid cells assigned did not survive the strip round-trip"
+    );
+}

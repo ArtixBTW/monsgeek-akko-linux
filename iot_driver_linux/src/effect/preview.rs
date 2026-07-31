@@ -15,8 +15,9 @@ use crossterm::{
 
 use super::{resolve, EffectDef, ResolvedEffect};
 use crate::led_stream::{apply_power_budget, send_full_frame, DEFAULT_POWER_BUDGET_MA};
-use crate::notify::keymap::{pos_to_matrix_index, COLS, MATRIX_LEN, ROWS};
+use crate::notify::keymap::{logical_to_led_pos, COLS, MATRIX_LEN, ROWS};
 use crate::profile::M1_V5_HE_KEY_NAMES;
+use monsgeek_transport::protocol::LedPos;
 
 /// Width of each cell in characters.
 const CELL_W: usize = 5;
@@ -36,7 +37,7 @@ const BG: Color = Color::Rgb {
 /// Run the terminal preview. Blocks until q/Esc is pressed.
 pub fn run(
     def: &EffectDef,
-    key_indices: &[usize],
+    key_positions: &[LedPos],
     vars: &BTreeMap<String, String>,
     fps: u32,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -50,7 +51,7 @@ pub fn run(
         .execute(terminal::EnterAlternateScreen)?
         .execute(cursor::Hide)?;
 
-    let result = run_loop(&mut stdout, &resolved, key_indices, frame_dur, def);
+    let result = run_loop(&mut stdout, &resolved, key_positions, frame_dur, def);
 
     // Cleanup
     stdout
@@ -64,7 +65,7 @@ pub fn run(
 fn run_loop(
     stdout: &mut io::Stdout,
     resolved: &ResolvedEffect,
-    key_indices: &[usize],
+    key_positions: &[LedPos],
     frame_dur: Duration,
     def: &EffectDef,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -110,7 +111,7 @@ fn run_loop(
                 let idx = row * COLS + col;
                 let label = &labels[idx];
 
-                let (fg, bg) = if key_indices.contains(&idx) {
+                let (fg, bg) = if key_positions.contains(&LedPos::new(idx as u8)) {
                     // Active key — show effect color
                     let lum = (rgb.r as u16 + rgb.g as u16 + rgb.b as u16) / 3;
                     let fg = if lum > 128 {
@@ -171,11 +172,10 @@ pub fn build_labels() -> Vec<String> {
         }
         let col = col_major_idx / ROWS;
         let row = col_major_idx % ROWS;
-        let matrix_idx = pos_to_matrix_index(row as u8, col as u8);
-        if matrix_idx < MATRIX_LEN {
+        let grid = usize::from(logical_to_led_pos(row as u8, col as u8));
+        if grid < MATRIX_LEN {
             // Truncate to 3 chars for display
-            let label: String = name.chars().take(3).collect();
-            labels[matrix_idx] = label;
+            labels[grid] = name.chars().take(3).collect();
         }
     }
 
@@ -189,7 +189,7 @@ pub fn build_labels() -> Vec<String> {
 pub fn play_on_hardware(
     kb: &monsgeek_keyboard::KeyboardInterface,
     resolved: &ResolvedEffect,
-    key_indices: &[usize],
+    key_positions: &[LedPos],
     running: &std::sync::atomic::AtomicBool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::atomic::Ordering;
@@ -202,9 +202,9 @@ pub fn play_on_hardware(
         let rgb = resolved.evaluate(elapsed_ms);
 
         let mut leds = [(0u8, 0u8, 0u8); MATRIX_LEN];
-        for &idx in key_indices {
-            if idx < MATRIX_LEN {
-                leds[idx] = (rgb.r, rgb.g, rgb.b);
+        for &pos in key_positions {
+            if let Some(led) = leds.get_mut(usize::from(pos)) {
+                *led = (rgb.r, rgb.g, rgb.b);
             }
         }
 

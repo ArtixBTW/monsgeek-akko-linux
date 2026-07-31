@@ -5,17 +5,18 @@
 //! `index = col * 6 + row`. This module bridges the two.
 
 use crate::profile::M1_V5_HE_KEY_NAMES;
+use monsgeek_transport::protocol::{led_grid, LedPos, StripIdx};
 
-/// Matrix dimensions (must match led_stream.rs)
-pub const COLS: usize = 16;
-pub const ROWS: usize = 6;
-pub const MATRIX_LEN: usize = COLS * ROWS; // 96
+/// LED grid dimensions, as `usize` for the indexing arithmetic in this module.
+pub const COLS: usize = led_grid::COLS as usize;
+pub const ROWS: usize = led_grid::ROWS as usize;
+pub const MATRIX_LEN: usize = led_grid::LEN; // 96
 
 /// Result of parsing a key target string.
 #[derive(Debug, Clone)]
 pub struct KeyTarget {
-    /// Matrix indices (row-major). For text: in character order; others sorted.
-    pub indices: Vec<usize>,
+    /// LED-grid cells. For text: in character order; others sorted.
+    pub indices: Vec<LedPos>,
     /// Per-index stagger slot. `slots[i]` is the stagger multiplier for `indices[i]`.
     /// For non-text selectors: `[0, 1, 2, ...]` (natural order).
     /// For text: may have gaps (space = skipped slot).
@@ -27,10 +28,10 @@ pub struct KeyTarget {
 /// Derived from firmware's static_led_pos_tbl vs M1_V5_HE_KEY_NAMES layout.
 const PHYS_GAP_COL: [u8; ROWS] = [1, 1, 1, 1, 12, 9];
 
-/// Return sorted row-major indices for all keys matching a predicate.
+/// Return the sorted LED-grid cells of all keys matching a predicate.
 ///
-/// The predicate receives `(row_major_index, key_name)` for each non-empty key.
-fn keys_matching(pred: impl Fn(usize, &str) -> bool) -> Vec<usize> {
+/// The predicate receives `(grid_position, key_name)` for each non-empty key.
+fn keys_matching(pred: impl Fn(LedPos, &str) -> bool) -> Vec<LedPos> {
     let mut result = Vec::new();
     for (col_major_idx, &name) in M1_V5_HE_KEY_NAMES.iter().enumerate() {
         if col_major_idx >= MATRIX_LEN || name.is_empty() {
@@ -38,9 +39,9 @@ fn keys_matching(pred: impl Fn(usize, &str) -> bool) -> Vec<usize> {
         }
         let col = col_major_idx / ROWS;
         let row = col_major_idx % ROWS;
-        let row_major = pos_to_matrix_index(row as u8, col as u8);
-        if pred(row_major, name) {
-            result.push(row_major);
+        let grid = logical_to_led_pos(row as u8, col as u8);
+        if pred(grid, name) {
+            result.push(grid);
         }
     }
     result.sort_unstable();
@@ -114,43 +115,28 @@ pub fn key_name_to_pos(name: &str) -> Option<(u8, u8)> {
     None
 }
 
-/// Convert a logical (row, col) from the key name table to the physical row-major
-/// matrix index for LED streaming. Accounts for per-row gap columns in the
+/// Convert a logical (row, col) from the key name table to the LED grid cell that
+/// physically holds that key. Accounts for the per-row gap columns in the
 /// firmware's `static_led_pos_tbl`.
-pub fn pos_to_matrix_index(row: u8, col: u8) -> usize {
+pub fn logical_to_led_pos(row: u8, col: u8) -> LedPos {
     let physical_col = if col >= PHYS_GAP_COL[row as usize] {
-        col as usize + 1
+        col + 1
     } else {
-        col as usize
+        col
     };
-    row as usize * COLS + physical_col
+    LedPos::new(row * led_grid::COLS + physical_col)
 }
 
-/// Firmware's `static_led_pos_tbl` — strip_idx for each matrix position.
-/// `STRIP_TO_MATRIX[strip_idx]` gives the matrix_idx (0xFF = unmapped).
-#[rustfmt::skip]
-const STRIP_TO_MATRIX: [u8; 82] = [
-    0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x1F, 0x1E,
-    0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x10, 0x20, 0x22, 0x23,
-    0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x3F, 0x3E, 0x3C, 0x3B,
-    0x3A, 0x39, 0x38, 0x37, 0x36, 0x35, 0x34, 0x33, 0x32, 0x30, 0x40, 0x42, 0x43, 0x44, 0x45, 0x46,
-    0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4D, 0x4E, 0x4F, 0x5F, 0x5E, 0x5D, 0x5C, 0x5B, 0x5A, 0x56, 0x52,
-    0x51, 0x50,
-];
-
-/// Convert a WS2812 strip index (0-81) to its 3-char key label.
-/// Returns "" for unmapped indices.
-pub fn strip_to_label(strip_idx: u8, labels: &[String]) -> &str {
-    if (strip_idx as usize) < STRIP_TO_MATRIX.len() {
-        let matrix_idx = STRIP_TO_MATRIX[strip_idx as usize] as usize;
-        if matrix_idx < labels.len() {
-            let l = labels[matrix_idx].trim();
-            if !l.is_empty() {
-                return labels[matrix_idx].as_str();
-            }
-        }
+/// Convert a WS2812 strip index to the 3-char label of the key it lights.
+/// Returns "" for unmapped indices. `labels` is indexed by [`LedPos`].
+pub fn strip_to_label(strip_idx: StripIdx, labels: &[String]) -> &str {
+    let Some(grid) = strip_idx.to_led_pos() else {
+        return "";
+    };
+    match labels.get(usize::from(grid)) {
+        Some(l) if !l.trim().is_empty() => l.as_str(),
+        _ => "",
     }
-    ""
 }
 
 /// Map a character to the key name on the keyboard.
@@ -272,8 +258,8 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
     if let Some(n_s) = lower.strip_prefix("row") {
         if let Ok(row) = n_s.parse::<usize>() {
             if row < ROWS {
-                return Ok(KeyTarget::from_sorted(keys_matching(|idx, _| {
-                    idx / COLS == row
+                return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
+                    pos.row() as usize == row
                 })));
             }
             return Err(format!("row out of range: {row} (0-{max})", max = ROWS - 1));
@@ -284,8 +270,8 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
     if let Some(n_s) = lower.strip_prefix("col") {
         if let Ok(col) = n_s.parse::<usize>() {
             if col < COLS {
-                return Ok(KeyTarget::from_sorted(keys_matching(|idx, _| {
-                    idx % COLS == col
+                return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
+                    pos.col() as usize == col
                 })));
             }
             return Err(format!("col out of range: {col} (0-{max})", max = COLS - 1));
@@ -302,8 +288,8 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
                 return Err(format!("index range is empty: #{l}..#{r}"));
             }
             let end = r.min(MATRIX_LEN - 1);
-            return Ok(KeyTarget::from_sorted(keys_matching(|idx, _| {
-                idx >= l && idx <= end
+            return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
+                (l..=end).contains(&usize::from(pos))
             })));
         }
 
@@ -321,14 +307,10 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
         } else {
             (r_col, l_col)
         };
-        let phys_min = pos_to_matrix_index(l_row, min_col) % COLS;
-        let phys_max = pos_to_matrix_index(l_row, max_col) % COLS;
-        let row = l_row as usize;
-        return Ok(KeyTarget::from_sorted(keys_matching(|idx, _| {
-            idx / COLS == row && {
-                let c = idx % COLS;
-                c >= phys_min && c <= phys_max
-            }
+        let phys_min = logical_to_led_pos(l_row, min_col).col();
+        let phys_max = logical_to_led_pos(l_row, max_col).col();
+        return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
+            pos.row() == l_row && (phys_min..=phys_max).contains(&pos.col())
         })));
     }
 
@@ -345,7 +327,7 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
             .parse()
             .map_err(|_| format!("invalid col: {col_s}"))?;
         if (row as usize) < ROWS && (col as usize) < COLS {
-            return Ok(KeyTarget::from_sorted(vec![pos_to_matrix_index(row, col)]));
+            return Ok(KeyTarget::from_sorted(vec![logical_to_led_pos(row, col)]));
         } else {
             return Err(format!("position out of range: {row},{col}"));
         }
@@ -357,7 +339,7 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
             .parse()
             .map_err(|_| format!("invalid index: {idx_s}"))?;
         if idx < MATRIX_LEN {
-            return Ok(KeyTarget::from_sorted(vec![idx]));
+            return Ok(KeyTarget::from_sorted(vec![LedPos::new(idx as u8)]));
         } else {
             return Err(format!("index out of range: {idx}"));
         }
@@ -365,7 +347,7 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
 
     // Try key name
     if let Some((row, col)) = key_name_to_pos(s) {
-        return Ok(KeyTarget::from_sorted(vec![pos_to_matrix_index(row, col)]));
+        return Ok(KeyTarget::from_sorted(vec![logical_to_led_pos(row, col)]));
     }
 
     Err(format!("unknown key: {s}"))
@@ -373,7 +355,7 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
 
 impl KeyTarget {
     /// Build from a sorted list of indices with sequential slot numbers.
-    fn from_sorted(indices: Vec<usize>) -> Self {
+    fn from_sorted(indices: Vec<LedPos>) -> Self {
         let slots = (0..indices.len()).collect();
         Self { indices, slots }
     }
@@ -394,9 +376,8 @@ fn parse_text_target(text: &str) -> Result<KeyTarget, String> {
 
         if let Some(key_name) = char_to_key_name(ch) {
             if let Some((row, col)) = key_name_to_pos(key_name) {
-                let idx = pos_to_matrix_index(row, col);
                 // Allow duplicates — repeated keys are split into timed sends
-                indices.push(idx);
+                indices.push(logical_to_led_pos(row, col));
                 slots.push(slot);
             }
         }
@@ -444,28 +425,37 @@ mod tests {
     #[test]
     fn test_matrix_index() {
         // Esc at (0,0) → col 0 < gap 1, no offset → index 0
-        assert_eq!(pos_to_matrix_index(0, 0), 0);
+        assert_eq!(logical_to_led_pos(0, 0), LedPos::new(0));
         // F1 at (0,1) → col 1 >= gap 1, +1 → physical col 2 → index 2
-        assert_eq!(pos_to_matrix_index(0, 1), 2);
+        assert_eq!(logical_to_led_pos(0, 1), LedPos::new(2));
         // Space at (5,6) → col 6 < gap 9, no offset → index 86
-        assert_eq!(pos_to_matrix_index(5, 6), 86);
+        assert_eq!(logical_to_led_pos(5, 6), LedPos::new(86));
         // RAlt at (5,9) → col 9 >= gap 9, +1 → physical col 10 → index 90
-        assert_eq!(pos_to_matrix_index(5, 9), 90);
+        assert_eq!(logical_to_led_pos(5, 9), LedPos::new(90));
     }
 
     #[test]
     fn test_parse_key_target_name() {
-        assert_eq!(parse_key_target("F1").unwrap().indices, vec![2]);
+        assert_eq!(
+            parse_key_target("F1").unwrap().indices,
+            vec![LedPos::new(2)]
+        );
     }
 
     #[test]
     fn test_parse_key_target_rowcol() {
-        assert_eq!(parse_key_target("0,1").unwrap().indices, vec![2]);
+        assert_eq!(
+            parse_key_target("0,1").unwrap().indices,
+            vec![LedPos::new(2)]
+        );
     }
 
     #[test]
     fn test_parse_key_target_index() {
-        assert_eq!(parse_key_target("#42").unwrap().indices, vec![42]);
+        assert_eq!(
+            parse_key_target("#42").unwrap().indices,
+            vec![LedPos::new(42)]
+        );
     }
 
     #[test]
@@ -483,7 +473,7 @@ mod tests {
         // Row 0: Esc, F1-F12, Del, Vol+ — varies by layout
         assert!(!row.is_empty());
         // All indices should be in 0..16
-        assert!(row.iter().all(|&i| i < COLS));
+        assert!(row.iter().all(|&p| p.row() == 0));
     }
 
     #[test]
@@ -491,7 +481,7 @@ mod tests {
         let col = parse_key_target("col0").unwrap().indices;
         // Col 0: Esc, `, Tab, Caps, LShift, LCtrl
         assert_eq!(col.len(), 6);
-        assert_eq!(col, vec![0, 16, 32, 48, 64, 80]);
+        assert_eq!(col, [0, 16, 32, 48, 64, 80].map(LedPos::new).to_vec());
     }
 
     #[test]
@@ -507,9 +497,9 @@ mod tests {
         let frow = parse_key_target("frow").unwrap().indices;
         assert_eq!(frow.len(), 12);
         // F1 at (0,1) → physical col 2 → index 2
-        assert_eq!(frow[0], 2);
+        assert_eq!(frow[0], LedPos::new(2));
         // F12 at (0,12) → physical col 13 → index 13
-        assert_eq!(frow[11], 13);
+        assert_eq!(frow[11], LedPos::new(13));
     }
 
     #[test]
@@ -517,8 +507,8 @@ mod tests {
         let numbers = parse_key_target("numbers").unwrap().indices;
         assert_eq!(numbers.len(), 10);
         // "1" at (1,1) → physical col 2 → 18; "0" at (1,10) → physical col 11 → 27
-        assert_eq!(numbers[0], 18);
-        assert_eq!(numbers[9], 27);
+        assert_eq!(numbers[0], LedPos::new(18));
+        assert_eq!(numbers[9], LedPos::new(27));
     }
 
     #[test]
@@ -535,7 +525,7 @@ mod tests {
         // Should include Q, W, E, R, T, Y, U = 7 keys (all in row 2, physical cols 2-8)
         assert_eq!(range.len(), 7);
         // Q at (2,1) → physical col 2 → index 34
-        assert_eq!(range[0], 34);
+        assert_eq!(range[0], LedPos::new(34));
     }
 
     #[test]
@@ -548,17 +538,26 @@ mod tests {
         let range = parse_key_target("#10..#20").unwrap().indices;
         // Only non-empty keys in index range 10..=20
         assert!(!range.is_empty());
-        assert!(range.iter().all(|&i| (10..=20).contains(&i)));
+        assert!(range.iter().all(|&p| (10..=20).contains(&usize::from(p))));
     }
 
     #[test]
     fn test_existing_selectors_still_work() {
         // Single key name (col 0, no gap offset)
-        assert_eq!(parse_key_target("Esc").unwrap().indices, vec![0]);
+        assert_eq!(
+            parse_key_target("Esc").unwrap().indices,
+            vec![LedPos::new(0)]
+        );
         // Row,col (logical col 1, gap offset → physical col 2)
-        assert_eq!(parse_key_target("0,1").unwrap().indices, vec![2]);
+        assert_eq!(
+            parse_key_target("0,1").unwrap().indices,
+            vec![LedPos::new(2)]
+        );
         // Direct index (no conversion)
-        assert_eq!(parse_key_target("#1").unwrap().indices, vec![1]);
+        assert_eq!(
+            parse_key_target("#1").unwrap().indices,
+            vec![LedPos::new(1)]
+        );
     }
 
     #[test]
@@ -583,7 +582,7 @@ mod tests {
         // After space, slots jump
         let t_pos = target.indices.iter().position(|&idx| {
             // T key
-            key_name_to_pos("T").map(|(r, c)| pos_to_matrix_index(r, c)) == Some(idx)
+            key_name_to_pos("T").map(|(r, c)| logical_to_led_pos(r, c)) == Some(idx)
         });
         assert!(t_pos.is_some());
         // T's slot should be 3 (after space at slot 2)

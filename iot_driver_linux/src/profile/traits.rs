@@ -48,15 +48,18 @@ pub trait DeviceProfile: Send + Sync {
 
     // === Matrix Mappings ===
 
-    /// LED matrix: position -> HID keycode (0 = empty/no LED)
-    fn led_matrix(&self) -> &[u8];
+    /// Factory keycode at each matrix position (0 = no key there).
+    ///
+    /// Column-major `MatrixPos` order — despite the name it once had, this has
+    /// nothing to do with LEDs; the LED grid is a different index space.
+    fn matrix_defaults(&self) -> &[u8];
 
     /// Get key name for a matrix position
     fn matrix_key_name(&self, position: u8) -> &str;
 
     /// Get all active matrix positions with their HID codes
     fn active_positions(&self) -> Vec<(usize, u8)> {
-        self.led_matrix()
+        self.matrix_defaults()
             .iter()
             .enumerate()
             .filter(|(_, &hid)| hid != 0)
@@ -64,12 +67,12 @@ pub trait DeviceProfile: Send + Sync {
             .collect()
     }
 
-    /// Find LED matrix position for a HID keycode
+    /// Find the matrix position that factory-defaults to a HID keycode
     fn hid_to_position(&self, hid_code: u8) -> Option<usize> {
         if hid_code == 0 {
             return None;
         }
-        self.led_matrix().iter().position(|&h| h == hid_code)
+        self.matrix_defaults().iter().position(|&h| h == hid_code)
     }
 
     // === Features ===
@@ -173,7 +176,7 @@ mod tests {
         fn key_count(&self) -> u8 {
             98
         }
-        fn led_matrix(&self) -> &[u8] {
+        fn matrix_defaults(&self) -> &[u8] {
             &[41, 53, 43, 0, 0, 0] // Esc, `, Tab, empty...
         }
         fn matrix_key_name(&self, pos: u8) -> &str {

@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use super::keymap::MATRIX_LEN;
 use crate::effect::ResolvedEffect;
+use monsgeek_transport::protocol::LedPos;
 
 /// A notification posted to the daemon.
 #[derive(Debug, Clone)]
@@ -12,13 +13,14 @@ pub struct Notification {
     pub id: u64,
     pub source: String,
     pub effect_name: String,
-    pub matrix_indices: Vec<usize>,
+    /// LED-grid cells this notification lights (row-major `row * 16 + col`).
+    pub led_positions: Vec<LedPos>,
     pub resolved: ResolvedEffect,
     pub priority: i32,
     pub ttl: Option<Duration>,
     pub created: Instant,
     /// Per-key stagger delay in ms. Keys not in this map start immediately.
-    pub stagger_offsets: HashMap<usize, f64>,
+    pub stagger_offsets: HashMap<LedPos, f64>,
 }
 
 impl Notification {
@@ -66,9 +68,9 @@ impl NotificationStore {
         self.next_id += 1;
         notif.id = id;
 
-        for &idx in &notif.matrix_indices {
-            if idx < MATRIX_LEN {
-                self.key_stacks[idx].insert(notif.priority, id);
+        for &pos in &notif.led_positions {
+            if let Some(stack) = self.key_stacks.get_mut(usize::from(pos)) {
+                stack.insert(notif.priority, id);
             }
         }
 
@@ -79,13 +81,15 @@ impl NotificationStore {
     /// Remove a notification by ID.
     pub fn remove(&mut self, id: u64) -> Option<Notification> {
         if let Some(notif) = self.notifications.remove(&id) {
-            for &idx in &notif.matrix_indices {
-                if idx < MATRIX_LEN {
-                    if let Some(&stack_id) = self.key_stacks[idx].get(&notif.priority) {
-                        if stack_id == id {
-                            self.key_stacks[idx].remove(&notif.priority);
-                        }
-                    }
+            for &pos in &notif.led_positions {
+                let idx = usize::from(pos);
+                if self
+                    .key_stacks
+                    .get(idx)
+                    .and_then(|s| s.get(&notif.priority))
+                    == Some(&id)
+                {
+                    self.key_stacks[idx].remove(&notif.priority);
                 }
             }
             Some(notif)
@@ -95,13 +99,13 @@ impl NotificationStore {
     }
 
     /// Remove all notifications for given key indices.
-    pub fn remove_by_key(&mut self, matrix_indices: &[usize]) -> Vec<u64> {
+    pub fn remove_by_key(&mut self, positions: &[LedPos]) -> Vec<u64> {
         let mut removed_ids = Vec::new();
-        for &idx in matrix_indices {
-            if idx >= MATRIX_LEN {
+        for &pos in positions {
+            let Some(stack) = self.key_stacks.get(usize::from(pos)) else {
                 continue;
-            }
-            let ids: Vec<u64> = self.key_stacks[idx].values().copied().collect();
+            };
+            let ids: Vec<u64> = stack.values().copied().collect();
             for id in ids {
                 if self.remove(id).is_some() {
                     removed_ids.push(id);
@@ -153,12 +157,10 @@ impl NotificationStore {
         removed
     }
 
-    /// Get the active (highest-priority) notification for a matrix index.
-    pub fn active_for_key(&self, matrix_idx: usize) -> Option<&Notification> {
-        if matrix_idx >= MATRIX_LEN {
-            return None;
-        }
-        self.key_stacks[matrix_idx]
+    /// Get the active (highest-priority) notification for an LED-grid cell.
+    pub fn active_for_key(&self, pos: LedPos) -> Option<&Notification> {
+        self.key_stacks
+            .get(usize::from(pos))?
             .values()
             .next_back()
             .and_then(|id| self.notifications.get(id))
@@ -171,11 +173,11 @@ impl NotificationStore {
             .values()
             .map(|n| {
                 let key_str = n
-                    .matrix_indices
+                    .led_positions
                     .iter()
                     .filter_map(|&i| {
                         labels
-                            .get(i)
+                            .get(usize::from(i))
                             .map(|l| l.trim())
                             .filter(|l| !l.is_empty())
                             .or(Some("?"))
@@ -213,7 +215,7 @@ mod tests {
     use super::*;
     use crate::effect;
 
-    fn make_notif(indices: Vec<usize>, priority: i32, source: &str) -> Notification {
+    fn make_notif(indices: Vec<LedPos>, priority: i32, source: &str) -> Notification {
         let mut vars = BTreeMap::new();
         vars.insert("color".to_string(), "red".to_string());
         let lib = effect::EffectLibrary::from_toml(effect::DEFAULT_EFFECTS_TOML).unwrap();
@@ -222,7 +224,7 @@ mod tests {
             id: 0,
             source: source.to_string(),
             effect_name: "solid".to_string(),
-            matrix_indices: indices,
+            led_positions: indices,
             resolved,
             priority,
             ttl: None,
@@ -234,40 +236,40 @@ mod tests {
     #[test]
     fn test_add_and_active() {
         let mut store = NotificationStore::new();
-        let n = make_notif(vec![1], 0, "test");
+        let n = make_notif(vec![LedPos::new(1)], 0, "test");
         let id = store.add(n);
         assert_eq!(id, 1);
-        assert!(store.active_for_key(1).is_some());
-        assert_eq!(store.active_for_key(1).unwrap().id, 1);
+        assert!(store.active_for_key(LedPos::new(1)).is_some());
+        assert_eq!(store.active_for_key(LedPos::new(1)).unwrap().id, 1);
     }
 
     #[test]
     fn test_priority_ordering() {
         let mut store = NotificationStore::new();
-        let low = make_notif(vec![5], -10, "tmux");
-        let high = make_notif(vec![5], 10, "email");
+        let low = make_notif(vec![LedPos::new(5)], -10, "tmux");
+        let high = make_notif(vec![LedPos::new(5)], 10, "email");
         let _low_id = store.add(low);
         let high_id = store.add(high);
-        assert_eq!(store.active_for_key(5).unwrap().id, high_id);
+        assert_eq!(store.active_for_key(LedPos::new(5)).unwrap().id, high_id);
     }
 
     #[test]
     fn test_remove_reveals_lower() {
         let mut store = NotificationStore::new();
-        let low = make_notif(vec![5], -10, "tmux");
-        let high = make_notif(vec![5], 10, "email");
+        let low = make_notif(vec![LedPos::new(5)], -10, "tmux");
+        let high = make_notif(vec![LedPos::new(5)], 10, "email");
         let low_id = store.add(low);
         let high_id = store.add(high);
         store.remove(high_id);
-        assert_eq!(store.active_for_key(5).unwrap().id, low_id);
+        assert_eq!(store.active_for_key(LedPos::new(5)).unwrap().id, low_id);
     }
 
     #[test]
     fn test_remove_by_source() {
         let mut store = NotificationStore::new();
-        store.add(make_notif(vec![1], 0, "tmux"));
-        store.add(make_notif(vec![2], 0, "tmux"));
-        store.add(make_notif(vec![3], 0, "email"));
+        store.add(make_notif(vec![LedPos::new(1)], 0, "tmux"));
+        store.add(make_notif(vec![LedPos::new(2)], 0, "tmux"));
+        store.add(make_notif(vec![LedPos::new(3)], 0, "email"));
         let removed = store.remove_by_source("tmux");
         assert_eq!(removed.len(), 2);
         assert_eq!(store.len(), 1);
@@ -276,7 +278,7 @@ mod tests {
     #[test]
     fn test_ttl_expiry() {
         let mut store = NotificationStore::new();
-        let mut n = make_notif(vec![1], 0, "test");
+        let mut n = make_notif(vec![LedPos::new(1)], 0, "test");
         n.ttl = Some(Duration::from_millis(0));
         n.created = Instant::now() - Duration::from_secs(1);
         store.add(n);

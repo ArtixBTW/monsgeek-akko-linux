@@ -23,7 +23,7 @@ pub struct JsonProfile {
     pub matrix_size: usize,
     #[serde(default = "default_layer_count")]
     pub layer_count: u8,
-    pub led_matrix: Vec<u8>,
+    pub matrix_defaults: Vec<u8>,
     pub matrix_key_names: Vec<String>,
     #[serde(default)]
     pub features: DeviceFeatures,
@@ -103,10 +103,10 @@ impl JsonProfile {
     /// Validate the profile data
     pub fn validate(&self) -> Result<(), LoadError> {
         // Check matrix sizes match
-        if self.led_matrix.len() != self.matrix_size {
+        if self.matrix_defaults.len() != self.matrix_size {
             return Err(LoadError::Validation(format!(
                 "LED matrix length ({}) doesn't match matrix_size ({})",
-                self.led_matrix.len(),
+                self.matrix_defaults.len(),
                 self.matrix_size
             )));
         }
@@ -120,7 +120,7 @@ impl JsonProfile {
         }
 
         // Check key count roughly matches active keys
-        let active_count = self.led_matrix.iter().filter(|&&x| x != 0).count();
+        let active_count = self.matrix_defaults.iter().filter(|&&x| x != 0).count();
         if active_count > 0 && (active_count as i32 - self.key_count as i32).abs() > 10 {
             // Allow some tolerance for special keys
             return Err(LoadError::Validation(format!(
@@ -223,8 +223,8 @@ impl DeviceProfile for JsonProfileWrapper {
         self.profile.layer_count
     }
 
-    fn led_matrix(&self) -> &[u8] {
-        &self.profile.led_matrix
+    fn matrix_defaults(&self) -> &[u8] {
+        &self.profile.matrix_defaults
     }
 
     fn matrix_key_name(&self, position: u8) -> &str {
@@ -278,7 +278,7 @@ mod tests {
         "keyCount": 3,
         "matrixSize": 6,
         "layerCount": 4,
-        "ledMatrix": [41, 53, 43, 0, 0, 0],
+        "matrixDefaults": [41, 53, 43, 0, 0, 0],
         "matrixKeyNames": ["Esc", "`", "Tab", "", "", ""],
         "features": {
             "magnetism": true,
@@ -323,7 +323,7 @@ mod tests {
             "displayName": "Bad",
             "keyCount": 3,
             "matrixSize": 10,
-            "ledMatrix": [41, 53, 43],
+            "matrixDefaults": [41, 53, 43],
             "matrixKeyNames": ["Esc", "`", "Tab"]
         }"#;
 
@@ -344,7 +344,7 @@ mod tests {
             "displayName": "Test",
             "keyCount": 3,
             "matrixSize": 3,
-            "ledMatrix": [41, 53, 43],
+            "matrixDefaults": [41, 53, 43],
             "matrixKeyNames": ["Esc", "`", "Tab"],
             "features": { "magnetism": true },
             "travelSettings": {

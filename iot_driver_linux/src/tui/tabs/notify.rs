@@ -13,6 +13,8 @@ use crate::effect::{
     ResolvedEffect,
 };
 
+use monsgeek_transport::protocol::{LedPos, StripIdx};
+
 use super::super::shared::AsyncResult;
 use super::super::App;
 
@@ -671,8 +673,8 @@ impl App {
             return;
         }
 
-        // Assign QWERTY row (matrix indices 33-44), no phase offset
-        let keys: Vec<(u8, u8)> = (33..=44).map(|idx| (idx, 0)).collect();
+        // Assign QWERTY row (LED grid cells 33-44), no phase offset
+        let keys: Vec<(LedPos, u8)> = (33..=44).map(|i| (LedPos::new(i), 0)).collect();
         if let Err(e) = kb.anim_assign(7, &keys) {
             self.status_msg = format!("Preview assign failed: {e}");
             return;
@@ -1078,7 +1080,7 @@ fn render_anim_status(f: &mut Frame, app: &App, area: Rect) {
         if let Some(keys) = snap.keys.get(&d.id) {
             // Key list per phase group
             let labels = &app.notify.labels;
-            let mut groups: std::collections::BTreeMap<u8, Vec<u8>> =
+            let mut groups: std::collections::BTreeMap<u8, Vec<StripIdx>> =
                 std::collections::BTreeMap::new();
             for k in keys {
                 groups.entry(k.phase_offset).or_default().push(k.strip_idx);
@@ -1092,7 +1094,7 @@ fn render_anim_status(f: &mut Frame, app: &App, area: Rect) {
                     .map(|&s| {
                         let l = crate::notify::keymap::strip_to_label(s, labels).trim();
                         if l.is_empty() {
-                            format!("#{s}")
+                            format!("#{}", s.get())
                         } else {
                             l.to_string()
                         }

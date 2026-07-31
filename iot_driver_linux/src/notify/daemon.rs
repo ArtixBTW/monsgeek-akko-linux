@@ -15,6 +15,7 @@ use super::state::{self, NotificationStore};
 use crate::anim::{self, AnimEngine, SharedSlotInfo, SlotEntry};
 use crate::effect::EffectLibrary;
 use monsgeek_keyboard::VendorEvent;
+use monsgeek_transport::protocol::{led_grid, LedPos};
 
 /// Run the notification daemon (blocking, standalone CLI entry point).
 ///
@@ -88,11 +89,12 @@ fn startup_animation(engine: &AnimEngine) {
     // Assign all keys with diagonal stagger: phase = (row + col) * 1
     // At 100Hz, phase_offset=1 → 8 ticks = 80ms per diagonal step
     let mut keys = Vec::new();
-    for row in 0..6u8 {
-        for col in 0..16u8 {
-            let matrix_idx = row * 16 + col;
+    for row in 0..led_grid::ROWS {
+        for col in 0..led_grid::COLS {
             let phase = row + col; // diagonal distance from Esc
-            keys.push((matrix_idx, phase));
+            if let Some(pos) = LedPos::from_row_col(row, col) {
+                keys.push((pos, phase));
+            }
         }
     }
 
@@ -114,12 +116,12 @@ fn program_notification(engine: &AnimEngine, notif: &state::Notification, def_id
     let one_shot = notif.ttl.is_some() && notif.resolved.duration_ms > 0.0;
     let priority = notif.priority.clamp(-128, 127) as i8;
 
-    let keys: Vec<(u8, u8)> = notif
-        .matrix_indices
+    let keys: Vec<(LedPos, u8)> = notif
+        .led_positions
         .iter()
-        .map(|&idx| {
-            let stagger_ms = notif.stagger_offsets.get(&idx).copied().unwrap_or(0.0);
-            (idx as u8, anim::ms_to_phase_offset(stagger_ms))
+        .map(|&pos| {
+            let stagger_ms = notif.stagger_offsets.get(&pos).copied().unwrap_or(0.0);
+            (pos, anim::ms_to_phase_offset(stagger_ms))
         })
         .collect();
 
@@ -339,12 +341,12 @@ pub async fn run_with_cancel(
             };
 
             if let Some(def_id) = existing_slot {
-                let keys: Vec<(u8, u8)> = notif
-                    .matrix_indices
+                let keys: Vec<(LedPos, u8)> = notif
+                    .led_positions
                     .iter()
-                    .map(|&idx| {
-                        let stagger_ms = notif.stagger_offsets.get(&idx).copied().unwrap_or(0.0);
-                        (idx as u8, anim::ms_to_phase_offset(stagger_ms))
+                    .map(|&pos| {
+                        let stagger_ms = notif.stagger_offsets.get(&pos).copied().unwrap_or(0.0);
+                        (pos, anim::ms_to_phase_offset(stagger_ms))
                     })
                     .collect();
                 if engine.kb().anim_assign(def_id, &keys).is_ok() {
@@ -377,7 +379,7 @@ pub async fn run_with_cancel(
                         "upload {} → slot {} ({} keys)",
                         notif.effect_name,
                         def_id,
-                        notif.matrix_indices.len()
+                        notif.led_positions.len()
                     ));
                 } else {
                     slots.free_by_notif(id);
@@ -402,15 +404,12 @@ pub async fn run_with_cancel(
                     (0..8u8).find(|&s| si.get(s).is_some_and(|e| e.compiled == wave.compiled))
                 };
                 if let Some(def_id) = def_id {
-                    let keys: Vec<(u8, u8)> = wave
+                    let keys: Vec<(LedPos, u8)> = wave
                         .indices
                         .iter()
                         .zip(&wave.slots)
-                        .map(|(&idx, &slot)| {
-                            (
-                                idx as u8,
-                                anim::ms_to_phase_offset(slot as f64 * wave.stagger_ms),
-                            )
+                        .map(|(&pos, &slot)| {
+                            (pos, anim::ms_to_phase_offset(slot as f64 * wave.stagger_ms))
                         })
                         .collect();
                     let _ = engine.kb().anim_assign(def_id, &keys);

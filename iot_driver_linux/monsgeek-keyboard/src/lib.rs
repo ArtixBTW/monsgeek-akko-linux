@@ -84,7 +84,9 @@ pub use monsgeek_transport::{TimestampedEvent, VendorEvent};
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
-use monsgeek_transport::protocol::{cmd, magnetism as mag_cmd, CommandTable, FN_WIRE_LAYER};
+use monsgeek_transport::protocol::{
+    cmd, magnetism as mag_cmd, CommandTable, LedPos, StripIdx, FN_WIRE_LAYER,
+};
 use monsgeek_transport::{ChecksumType, FlowControlTransport, Transport};
 // Typed commands
 use monsgeek_transport::command::{
@@ -2047,16 +2049,18 @@ impl KeyboardInterface {
 
     /// Assign keys to an animation definition.
     ///
-    /// `keys` is a slice of `(matrix_idx, phase_offset)` pairs.
+    /// `keys` is a slice of `(LedPos, phase_offset)` pairs — the *grid* space.
+    /// [`Self::anim_query_keys`] reads back the *strip* space; the firmware
+    /// converts, so the two are deliberately not the same type.
     /// Chunked automatically for packets > 29 entries.
-    pub fn anim_assign(&self, def_id: u8, keys: &[(u8, u8)]) -> Result<(), KeyboardError> {
+    pub fn anim_assign(&self, def_id: u8, keys: &[(LedPos, u8)]) -> Result<(), KeyboardError> {
         use monsgeek_transport::command::AnimAssign;
         for chunk in keys.chunks(29) {
             self.transport.query_command(
                 cmd::ANIM_CMD,
                 &AnimAssign {
                     def_id,
-                    keys: chunk.to_vec(),
+                    keys: chunk.iter().map(|&(p, off)| (p.get(), off)).collect(),
                 }
                 .to_data(),
                 ChecksumType::None,
@@ -2118,14 +2122,22 @@ impl KeyboardInterface {
 
     /// Query key assignments for an animation definition slot.
     ///
-    /// Returns `(strip_idx, phase_offset)` pairs for all keys assigned to the def.
-    pub fn anim_query_keys(&self, def_id: u8) -> Result<Vec<(u8, u8)>, KeyboardError> {
+    /// Returns `(StripIdx, phase_offset)` pairs for all keys assigned to the def.
+    ///
+    /// Note the asymmetry with [`Self::anim_assign`], which takes [`LedPos`]:
+    /// the firmware stores its key table in strip order. Round-tripping needs a
+    /// deliberate conversion through the firmware's `static_led_pos_tbl`.
+    pub fn anim_query_keys(&self, def_id: u8) -> Result<Vec<(StripIdx, u8)>, KeyboardError> {
         use monsgeek_transport::command::{AnimQueryKeys, AnimQueryKeysResponse};
         match self
             .transport
             .query::<AnimQueryKeys, AnimQueryKeysResponse>(&AnimQueryKeys { def_id })
         {
-            Ok(r) => Ok(r.keys),
+            Ok(r) => Ok(r
+                .keys
+                .into_iter()
+                .map(|(i, off)| (StripIdx::new(i), off))
+                .collect()),
             Err(_) => Ok(Vec::new()),
         }
     }

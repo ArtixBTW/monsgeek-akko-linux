@@ -8,6 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use monsgeek_keyboard::{AnimDefStatus, AnimStatus, KeyboardInterface};
+use monsgeek_transport::protocol::{LedPos, StripIdx};
 
 use crate::effect::{self, CompiledAnim, ResolvedEffect};
 
@@ -73,7 +74,7 @@ pub struct AnimEngine {
 /// Key assignment: strip index + phase offset.
 #[derive(Debug, Clone, Copy)]
 pub struct KeyAssignment {
-    pub strip_idx: u8,
+    pub strip_idx: StripIdx,
     pub phase_offset: u8,
 }
 
@@ -222,7 +223,7 @@ impl AnimEngine {
         effect: &ResolvedEffect,
         priority: i8,
         one_shot: bool,
-        keys: &[(u8, u8)], // (matrix_idx, phase_offset)
+        keys: &[(LedPos, u8)],
     ) -> Result<ProgrammedAnim, String> {
         let compiled = effect
             .compile_for_firmware(priority, one_shot)
@@ -254,7 +255,7 @@ impl AnimEngine {
         &self,
         def_id: u8,
         compiled: &CompiledAnim,
-        keys: &[(u8, u8)],
+        keys: &[(LedPos, u8)],
     ) -> Result<(), String> {
         self.kb
             .anim_define(

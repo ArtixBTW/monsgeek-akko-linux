@@ -84,8 +84,8 @@ impl DeviceProfile for M1V5HeProfile {
         16 // M1 V5 HE supports 16 layers
     }
 
-    fn led_matrix(&self) -> &[u8] {
-        &M1_V5_HE_LED_MATRIX
+    fn matrix_defaults(&self) -> &[u8] {
+        &M1_V5_HE_MATRIX_DEFAULTS
     }
 
     fn matrix_key_name(&self, position: u8) -> &str {
@@ -116,10 +116,10 @@ impl DeviceProfile for M1V5HeProfile {
     }
 }
 
-/// M1 V5 HE LED matrix: position -> HID keycode
-/// 98 active keys + empty positions = 126 total matrix positions
-/// Column-major order: each column has 6 rows (top to bottom)
-pub const M1_V5_HE_LED_MATRIX: [u8; MATRIX_SIZE_M1_V5] = [
+/// M1 V5 HE factory keycode at each matrix position (0 = no key there).
+/// 98 active keys + empty positions = 126 total matrix positions.
+/// Column-major order: each column has 6 rows (top to bottom).
+pub const M1_V5_HE_MATRIX_DEFAULTS: [u8; MATRIX_SIZE_M1_V5] = [
     // Col 0: Esc row down to Ctrl
     41,  // 0: Esc
     53,  // 1: `
@@ -237,8 +237,8 @@ pub const M1_V5_HE_LED_MATRIX: [u8; MATRIX_SIZE_M1_V5] = [
 ];
 
 /// Key names for M1 V5 HE matrix positions
-/// Derived from LED matrix HID codes using standard HID usage table
-/// Each name corresponds to the same index in M1_V5_HE_LED_MATRIX
+/// Derived from the factory keycodes using the standard HID usage table
+/// Each name corresponds to the same index in M1_V5_HE_MATRIX_DEFAULTS
 pub const M1_V5_HE_KEY_NAMES: &[&str] = &[
     // Col 0 (0-5): Esc column
     "Esc",    // 0: HID 41
@@ -372,8 +372,8 @@ mod tests {
         assert!(profile.has_magnetism());
 
         // Verify LED matrix
-        assert_eq!(profile.led_matrix().len(), MATRIX_SIZE_M1_V5);
-        assert_eq!(profile.led_matrix()[0], 41); // Esc
+        assert_eq!(profile.matrix_defaults().len(), MATRIX_SIZE_M1_V5);
+        assert_eq!(profile.matrix_defaults()[0], 41); // Esc
 
         // Verify key names match matrix positions
         assert_eq!(profile.matrix_key_name(0), "Esc");
@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn test_key_names_count() {
         assert_eq!(M1_V5_HE_KEY_NAMES.len(), MATRIX_SIZE_M1_V5);
-        assert_eq!(M1_V5_HE_LED_MATRIX.len(), MATRIX_SIZE_M1_V5);
+        assert_eq!(M1_V5_HE_MATRIX_DEFAULTS.len(), MATRIX_SIZE_M1_V5);
     }
 
     #[test]
@@ -398,7 +398,7 @@ mod tests {
         let active = profile.active_positions();
 
         // Count non-empty positions in the matrix
-        let expected = M1_V5_HE_LED_MATRIX.iter().filter(|&&x| x != 0).count();
+        let expected = M1_V5_HE_MATRIX_DEFAULTS.iter().filter(|&&x| x != 0).count();
         assert_eq!(active.len(), expected);
     }
 

@@ -304,6 +304,123 @@ impl From<HidUsage> for u8 {
     }
 }
 
+/// The 16×6 LED grid the firmware addresses by `row * 16 + col`.
+pub mod led_grid {
+    pub const COLS: u8 = 16;
+    pub const ROWS: u8 = 6;
+    /// Number of grid cells; the WS2812 strip populates 82 of them.
+    pub const LEN: usize = COLS as usize * ROWS as usize;
+}
+
+/// A cell of the 16×6 LED grid, addressed row-major as `row * 16 + col`.
+///
+/// This is the LED streaming and animation-assignment space. It is *not*
+/// [`MatrixPos`] (column-major `col * 6 + row`, the config protocol's space) and
+/// it is *not* [`StripIdx`] (the WS2812 wiring order). The firmware converts
+/// between grid and strip itself, which is why `anim_assign` takes one and
+/// `anim_query_keys` returns the other.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct LedPos(u8);
+
+impl LedPos {
+    pub const fn new(pos: u8) -> Self {
+        Self(pos)
+    }
+
+    /// Build from grid coordinates. `None` if either is off the grid.
+    pub const fn from_row_col(row: u8, col: u8) -> Option<Self> {
+        if row >= led_grid::ROWS || col >= led_grid::COLS {
+            return None;
+        }
+        Some(Self(row * led_grid::COLS + col))
+    }
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    pub const fn row(self) -> u8 {
+        self.0 / led_grid::COLS
+    }
+
+    pub const fn col(self) -> u8 {
+        self.0 % led_grid::COLS
+    }
+}
+
+impl From<LedPos> for u8 {
+    fn from(p: LedPos) -> Self {
+        p.0
+    }
+}
+
+impl From<LedPos> for usize {
+    fn from(p: LedPos) -> Self {
+        p.0 as usize
+    }
+}
+
+/// A WS2812 LED's position along the strip, in firmware `static_led_pos_tbl`
+/// order (serpentine: even rows left-to-right, odd rows right-to-left).
+///
+/// Only the firmware's table relates this to [`LedPos`]; there is no arithmetic
+/// conversion, which is why the two are separate types rather than one.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct StripIdx(u8);
+
+impl StripIdx {
+    /// LEDs on the strip.
+    pub const COUNT: u8 = 82;
+
+    pub const fn new(idx: u8) -> Self {
+        Self(idx)
+    }
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// Which LED grid cell this strip LED lights, per the firmware's table.
+    ///
+    /// The only bridge between the two spaces, and deliberately a named method
+    /// rather than a `From` impl: `anim_assign` speaks [`LedPos`] while
+    /// `anim_query_keys` answers in [`StripIdx`], so a round-trip has to say so.
+    /// `None` for strip indices the firmware leaves unmapped.
+    pub fn to_led_pos(self) -> Option<LedPos> {
+        let &grid = STRIP_TO_LED_GRID.get(self.0 as usize)?;
+        ((grid as usize) < led_grid::LEN).then(|| LedPos::new(grid))
+    }
+}
+
+/// Firmware's `static_led_pos_tbl`, inverted: which LED grid cell each WS2812 on
+/// the strip lights. `STRIP_TO_LED_GRID[strip_idx]` is a [`LedPos`] (0xFF = unmapped).
+///
+/// This table is the *only* relation between the strip and grid spaces — there is
+/// no arithmetic conversion, which is why they are separate types.
+#[rustfmt::skip]
+const STRIP_TO_LED_GRID: [u8; StripIdx::COUNT as usize] = [
+    0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x1F, 0x1E,
+    0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x10, 0x20, 0x22, 0x23,
+    0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D, 0x2E, 0x2F, 0x3F, 0x3E, 0x3C, 0x3B,
+    0x3A, 0x39, 0x38, 0x37, 0x36, 0x35, 0x34, 0x33, 0x32, 0x30, 0x40, 0x42, 0x43, 0x44, 0x45, 0x46,
+    0x47, 0x48, 0x49, 0x4A, 0x4B, 0x4D, 0x4E, 0x4F, 0x5F, 0x5E, 0x5D, 0x5C, 0x5B, 0x5A, 0x56, 0x52,
+    0x51, 0x50,
+];
+
+impl From<StripIdx> for u8 {
+    fn from(i: StripIdx) -> Self {
+        i.0
+    }
+}
+
+impl From<StripIdx> for usize {
+    fn from(i: StripIdx) -> Self {
+        i.0 as usize
+    }
+}
+
 /// Key matrix position to name mapping (M1 V5 / SG9000 layout)
 ///
 /// Column-major order, 6 rows per column.  Verified against firmware
@@ -846,4 +963,62 @@ pub fn build_ble_command(cmd: u8, data: &[u8], checksum_type: ChecksumType) -> V
     // Apply checksum starting from cmd byte (index 2)
     apply_checksum(&mut buf[2..], checksum_type);
     buf
+}
+
+/// The LED grid ([`LedPos`], row-major) and the WS2812 strip ([`StripIdx`],
+/// wiring order) are two index spaces over the same 82 LEDs. Nothing round-trips
+/// between them without `STRIP_TO_LED_GRID`, so these pin the table.
+#[cfg(test)]
+mod led_index_space_tests {
+    use super::{led_grid, LedPos, StripIdx, STRIP_TO_LED_GRID};
+    use std::collections::HashSet;
+
+    #[test]
+    fn every_strip_led_lights_a_distinct_grid_cell() {
+        let mut seen = HashSet::new();
+        for i in 0..StripIdx::COUNT {
+            let grid = StripIdx::new(i)
+                .to_led_pos()
+                .unwrap_or_else(|| panic!("strip {i} maps off the 16x6 grid"));
+            assert!(
+                seen.insert(grid),
+                "grid cell {} claimed by two strip LEDs",
+                grid.get()
+            );
+        }
+    }
+
+    /// The two spaces disagree for most LEDs, which is why reading an
+    /// `anim_query_keys` result as a grid position lights the wrong key.
+    #[test]
+    fn strip_order_is_not_grid_order() {
+        let same = (0..StripIdx::COUNT)
+            .filter(|&i| STRIP_TO_LED_GRID[i as usize] == i)
+            .count();
+        assert!(
+            same < StripIdx::COUNT as usize / 2,
+            "{same}/{} LEDs share an index — the two spaces would be interchangeable",
+            StripIdx::COUNT
+        );
+    }
+
+    #[test]
+    fn out_of_range_strip_has_no_grid_cell() {
+        assert_eq!(StripIdx::new(StripIdx::COUNT).to_led_pos(), None);
+        assert_eq!(StripIdx::new(200).to_led_pos(), None);
+        // Strip 0 is Esc, the top-left grid cell.
+        assert_eq!(StripIdx::new(0).to_led_pos(), Some(LedPos::new(0)));
+    }
+
+    #[test]
+    fn grid_positions_round_trip_through_row_col() {
+        for row in 0..led_grid::ROWS {
+            for col in 0..led_grid::COLS {
+                let pos = LedPos::from_row_col(row, col).expect("on the grid");
+                assert_eq!((pos.row(), pos.col()), (row, col));
+            }
+        }
+        assert_eq!(LedPos::from_row_col(led_grid::ROWS, 0), None);
+        assert_eq!(LedPos::from_row_col(0, led_grid::COLS), None);
+    }
 }

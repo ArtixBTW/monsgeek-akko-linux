@@ -12,12 +12,13 @@ use zbus::interface;
 use super::keymap;
 use super::state::{Notification, NotificationStore};
 use crate::effect::{self, EffectLibrary};
+use monsgeek_transport::protocol::LedPos;
 
 /// A delayed key reassignment for repeated keys in text animations.
 #[derive(Debug, Clone)]
 pub struct PendingWave {
-    /// Matrix indices to assign.
-    pub indices: Vec<usize>,
+    /// LED-grid cells to assign.
+    pub indices: Vec<LedPos>,
     /// Original slot numbers (for phase offset computation).
     pub slots: Vec<usize>,
     /// Stagger interval in ms per slot.
@@ -128,7 +129,7 @@ impl NotifyInterface {
             id: 0,
             source: source.to_string(),
             effect_name: effect_name.to_string(),
-            matrix_indices: wave1_indices.clone(),
+            led_positions: wave1_indices.clone(),
             resolved: resolved.clone(),
             priority,
             ttl,
@@ -215,10 +216,10 @@ impl NotifyInterface {
     }
 }
 
-/// Split indices+slots into waves where no key index repeats within a wave.
-/// Each wave is a `(indices, slots)` pair preserving original slot numbers.
-fn split_into_waves(indices: &[usize], slots: &[usize]) -> Vec<(Vec<usize>, Vec<usize>)> {
-    let mut waves: Vec<(Vec<usize>, Vec<usize>)> = Vec::new();
+/// Split positions+slots into waves where no key repeats within a wave.
+/// Each wave is a `(positions, slots)` pair preserving original slot numbers.
+fn split_into_waves(indices: &[LedPos], slots: &[usize]) -> Vec<(Vec<LedPos>, Vec<usize>)> {
+    let mut waves: Vec<(Vec<LedPos>, Vec<usize>)> = Vec::new();
 
     for (&idx, &slot) in indices.iter().zip(slots) {
         // Find the first wave that doesn't already contain this key
@@ -237,10 +238,10 @@ fn split_into_waves(indices: &[usize], slots: &[usize]) -> Vec<(Vec<usize>, Vec<
 }
 
 fn build_stagger_offsets(
-    indices: &[usize],
+    indices: &[LedPos],
     slots: &[usize],
     stagger_ms: f64,
-) -> HashMap<usize, f64> {
+) -> HashMap<LedPos, f64> {
     if stagger_ms <= 0.0 {
         return HashMap::new();
     }

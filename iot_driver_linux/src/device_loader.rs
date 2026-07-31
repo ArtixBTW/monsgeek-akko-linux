@@ -77,10 +77,10 @@ pub struct JsonDeviceDefinition {
     /// Maximum polling rate in Hz. Recorded per USB product by the vendor, not per model.
     #[serde(default)]
     pub report_rate: Option<u16>,
-    /// LED matrix mapping position index to HID keycode
-    /// Used for LED effects and depth report key identification
+    /// Factory keycode at each matrix position. Legacy: real device data supplies
+    /// matrices via `device_matrices.json` instead, so this is normally absent.
     #[serde(default)]
-    pub led_matrix: Option<Vec<u8>>,
+    pub matrix_defaults: Option<Vec<u8>>,
     /// Chip family (e.g., "RY5088", "YC3123")
     #[serde(default)]
     pub chip_family: Option<String>,
@@ -106,7 +106,7 @@ impl JsonDeviceDefinition {
 
     /// Get key name for a matrix position index
     pub fn key_name(&self, index: usize) -> Option<&'static str> {
-        let matrix = self.led_matrix.as_ref()?;
+        let matrix = self.matrix_defaults.as_ref()?;
         let hid_code = *matrix.get(index)?;
         let name = crate::protocol::hid::key_name(HidUsage::new(hid_code));
         if name == "?" || name == "None" {
@@ -118,7 +118,7 @@ impl JsonDeviceDefinition {
 
     /// Find matrix position index for a key name (case-insensitive)
     pub fn key_index(&self, name: &str) -> Option<usize> {
-        let matrix = self.led_matrix.as_ref()?;
+        let matrix = self.matrix_defaults.as_ref()?;
         let target_hid = crate::protocol::hid::key_code_from_name(name)?;
         matrix.iter().position(|&hid| hid == target_hid.get())
     }
@@ -1147,8 +1147,8 @@ mod tests {
     }
 
     #[test]
-    fn test_led_matrix() {
-        // Test JSON with LED matrix
+    fn test_matrix_defaults() {
+        // Test JSON carrying an inline factory-keycode matrix
         let json = r#"{
             "version": 2,
             "devices": [{
@@ -1157,7 +1157,7 @@ mod tests {
                 "pid": 20528,
                 "name": "test",
                 "displayName": "Test",
-                "ledMatrix": [41, 53, 43, 57, 225, 224, 58, 30, 20, 4, 29, 225, 224, 227, 59, 26, 22, 27]
+                "matrixDefaults": [41, 53, 43, 57, 225, 224, 58, 30, 20, 4, 29, 225, 224, 227, 59, 26, 22, 27]
             }]
         }"#;
         // Matrix positions: 0=Esc(41), 1=`(53), 2=Tab(43), 3=Caps(57), 4=LShift(225), 5=LCtrl(224)
