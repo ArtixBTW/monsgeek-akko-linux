@@ -2,6 +2,7 @@
 // Supports loading from embedded JSON or external file
 
 use crate::profile::types::FnSysLayer;
+use monsgeek_transport::protocol::HidUsage;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -107,7 +108,7 @@ impl JsonDeviceDefinition {
     pub fn key_name(&self, index: usize) -> Option<&'static str> {
         let matrix = self.led_matrix.as_ref()?;
         let hid_code = *matrix.get(index)?;
-        let name = crate::protocol::hid::key_name(hid_code);
+        let name = crate::protocol::hid::key_name(HidUsage::new(hid_code));
         if name == "?" || name == "None" {
             None
         } else {
@@ -119,7 +120,7 @@ impl JsonDeviceDefinition {
     pub fn key_index(&self, name: &str) -> Option<usize> {
         let matrix = self.led_matrix.as_ref()?;
         let target_hid = crate::protocol::hid::key_code_from_name(name)?;
-        matrix.iter().position(|&hid| hid == target_hid)
+        matrix.iter().position(|&hid| hid == target_hid.get())
     }
 
     /// Get all key indices for WASD keys
@@ -1189,26 +1190,27 @@ mod tests {
     #[test]
     fn test_hid_code_conversion() {
         use crate::protocol::hid::{key_code_from_name, key_name};
+        use monsgeek_transport::protocol::HidUsage;
 
         // Letters
-        assert_eq!(key_name(4), "A");
-        assert_eq!(key_name(26), "W");
-        assert_eq!(key_name(22), "S");
-        assert_eq!(key_name(7), "D");
+        assert_eq!(key_name(HidUsage::new(4)), "A");
+        assert_eq!(key_name(HidUsage::new(26)), "W");
+        assert_eq!(key_name(HidUsage::new(22)), "S");
+        assert_eq!(key_name(HidUsage::new(7)), "D");
 
         // Numbers
-        assert_eq!(key_name(30), "1");
-        assert_eq!(key_name(39), "0");
+        assert_eq!(key_name(HidUsage::new(30)), "1");
+        assert_eq!(key_name(HidUsage::new(39)), "0");
 
         // Modifiers
-        assert_eq!(key_name(224), "LCtrl");
-        assert_eq!(key_name(225), "LShift");
+        assert_eq!(key_name(HidUsage::new(224)), "LCtrl");
+        assert_eq!(key_name(HidUsage::new(225)), "LShift");
 
         // Reverse
-        assert_eq!(key_code_from_name("A"), Some(4));
-        assert_eq!(key_code_from_name("w"), Some(26)); // Case insensitive
-        assert_eq!(key_code_from_name("ESCAPE"), Some(41));
-        assert_eq!(key_code_from_name("lshift"), Some(225));
+        assert_eq!(key_code_from_name("A"), Some(HidUsage::new(4)));
+        assert_eq!(key_code_from_name("w"), Some(HidUsage::new(26))); // Case insensitive
+        assert_eq!(key_code_from_name("ESCAPE"), Some(HidUsage::new(41)));
+        assert_eq!(key_code_from_name("lshift"), Some(HidUsage::new(225)));
     }
 
     #[test]

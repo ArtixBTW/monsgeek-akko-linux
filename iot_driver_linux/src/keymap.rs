@@ -8,7 +8,7 @@
 
 use crate::key_action::KeyAction;
 use crate::protocol::hid;
-use monsgeek_transport::protocol::matrix;
+use monsgeek_transport::protocol::{matrix, HidUsage, MatrixPos};
 
 use monsgeek_keyboard::{
     DksConfig, KeyMode, KeyboardError, KeyboardInterface, ModeByte, SNAPTAP_UNBOUND,
@@ -25,7 +25,7 @@ pub use monsgeek_transport::protocol::{KeyRef, Layer};
 ///
 /// `default_hid_code`: the factory default HID keycode for this matrix position,
 /// derived from `hid::key_code_from_name(matrix::key_name(i))`.
-pub fn is_user_remap(k: &[u8], default_hid_code: u8) -> bool {
+pub fn is_user_remap(k: &[u8], default_hid_code: HidUsage) -> bool {
     let Ok(bytes) = <[u8; 4]>::try_from(k) else {
         return false;
     };
@@ -54,14 +54,20 @@ const KEYMATRIX_PAGES: usize = 8;
 /// Write a key config via KeyboardInterface.
 pub fn set_key(
     kb: &KeyboardInterface,
-    index: u8,
+    index: MatrixPos,
     layer: Layer,
     action: &KeyAction,
 ) -> Result<(), KeyboardError> {
     let config = action.to_config_bytes();
     match layer {
-        Layer::Fn => kb.set_fn_config(kb.active_profile(), index, config),
-        _ => kb.set_keymatrix_config(kb.active_profile(), index, layer.wire_layer(), config, true),
+        Layer::Fn => kb.set_fn_config(kb.active_profile(), index.get(), config),
+        _ => kb.set_keymatrix_config(
+            kb.active_profile(),
+            index.get(),
+            layer.wire_layer(),
+            config,
+            true,
+        ),
     }
 }
 
@@ -70,8 +76,8 @@ pub fn set_key(
 ///
 /// Only correct for boards that match that table. Prefer
 /// [`device_default_keycode`], which consults the device's own layout first.
-pub fn default_keycode(index: u8) -> u8 {
-    hid::key_code_from_name(matrix::key_name(index)).unwrap_or(0)
+pub fn default_keycode(pos: MatrixPos) -> HidUsage {
+    hid::key_code_from_name(matrix::key_name(pos)).unwrap_or(HidUsage::NONE)
 }
 
 /// Factory-default HID keycode for a matrix position on *this* device.
@@ -80,9 +86,10 @@ pub fn default_keycode(index: u8) -> u8 {
 /// layout differs from the generic one has every differing key read as customised
 /// (the Womier SK75 has LMeta where the generic table has LAlt, and End where it
 /// has Home).
-pub fn device_default_keycode(kb: &KeyboardInterface, index: u8) -> u8 {
-    kb.matrix_default(index as usize)
-        .unwrap_or_else(|| default_keycode(index))
+pub fn device_default_keycode(kb: &KeyboardInterface, pos: MatrixPos) -> HidUsage {
+    kb.matrix_default(pos.into())
+        .map(HidUsage::new)
+        .unwrap_or_else(|| default_keycode(pos))
 }
 
 /// Reset a key to its firmware default.
@@ -92,10 +99,20 @@ pub fn device_default_keycode(kb: &KeyboardInterface, index: u8) -> u8 {
 /// reset by writing the position's factory-default keycode, not zeros. The overlay
 /// layers (Layer1 / Fn) treat a zero entry as a transparent fall-through to the
 /// base, so zeros are the correct "default" there.
-pub fn reset_key(kb: &KeyboardInterface, index: u8, layer: Layer) -> Result<(), KeyboardError> {
+pub fn reset_key(
+    kb: &KeyboardInterface,
+    index: MatrixPos,
+    layer: Layer,
+) -> Result<(), KeyboardError> {
     match layer {
-        Layer::Base => kb.set_keymatrix(0, index, device_default_keycode(kb, index), true, 0),
-        Layer::Layer1 | Layer::Fn => kb.reset_key(layer.wire_layer(), index),
+        Layer::Base => kb.set_keymatrix(
+            0,
+            index.get(),
+            device_default_keycode(kb, index).get(),
+            true,
+            0,
+        ),
+        Layer::Layer1 | Layer::Fn => kb.reset_key(layer.wire_layer(), index.get()),
     }
 }
 
@@ -108,7 +125,7 @@ pub fn reset_key(kb: &KeyboardInterface, index: u8, layer: Layer) -> Result<(), 
 /// mode-specific values). Backs the "Key Mapping" TUI tab.
 #[derive(Debug, Clone)]
 pub struct KeyRow {
-    pub index: u8,
+    pub index: MatrixPos,
     /// Display name, device-resolved where the profile or matrix DB names it.
     pub position: String,
     /// Base mode (magnetism subcmd 7). Reinterprets the keymatrix layers:
@@ -188,14 +205,14 @@ pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, Key
                 // — the M1 V5's volume encoder at 90/91, say — read as unnamed.
                 let device = kb.matrix_key_name(i);
                 if device.is_empty() {
-                    matrix::key_name(i as u8).to_string()
+                    matrix::key_name(MatrixPos::new(i as u8)).to_string()
                 } else {
                     device.to_string()
                 }
             })
             .collect(),
         defaults: (0..key_count)
-            .map(|i| device_default_keycode(kb, i as u8))
+            .map(|i| device_default_keycode(kb, MatrixPos::new(i as u8)))
             .collect(),
         layers,
         fn_layer,
@@ -213,7 +230,7 @@ pub struct RawKeyRows {
     /// Display name per matrix position; empty means "no physical key here".
     pub names: Vec<String>,
     /// Factory keycode per matrix position, for deciding what counts as customised.
-    pub defaults: Vec<u8>,
+    pub defaults: Vec<HidUsage>,
     /// Keymatrix layers 0-3.
     pub layers: [Vec<u8>; 4],
     pub fn_layer: Option<Vec<u8>>,
@@ -239,7 +256,7 @@ pub fn build_key_rows(raw: &RawKeyRows) -> Vec<KeyRow> {
         if name.is_empty() || name == "?" {
             continue;
         }
-        let default = raw.defaults.get(i).copied().unwrap_or(0);
+        let default = raw.defaults.get(i).copied().unwrap_or(HidUsage::NONE);
         let mode_byte = ModeByte::from_u8(trig.key_modes.get(i).copied().unwrap_or(0));
 
         let mut outputs = [KeyAction::Disabled; 4];
@@ -270,7 +287,7 @@ pub fn build_key_rows(raw: &RawKeyRows) -> Vec<KeyRow> {
 
         let snap = snaptap.get(i).copied().unwrap_or(SNAPTAP_UNBOUND);
         rows.push(KeyRow {
-            index: i as u8,
+            index: MatrixPos::new(i as u8),
             position: name,
             mode: mode_byte.base,
             rapid_trigger: mode_byte.rapid_trigger,
@@ -336,7 +353,7 @@ mod tests {
     #[test]
     fn keyref_parse_bare_name() {
         let kr: KeyRef = "Caps".parse().unwrap();
-        assert_eq!(kr.index, 3);
+        assert_eq!(kr.index, MatrixPos::new(3));
         assert_eq!(kr.layer, Layer::Base);
         assert_eq!(kr.position, "Caps");
     }
@@ -344,53 +361,53 @@ mod tests {
     #[test]
     fn keyref_parse_fn_prefix() {
         let kr: KeyRef = "Fn+Caps".parse().unwrap();
-        assert_eq!(kr.index, 3);
+        assert_eq!(kr.index, MatrixPos::new(3));
         assert_eq!(kr.layer, Layer::Fn);
     }
 
     #[test]
     fn keyref_parse_l1_prefix() {
         let kr: KeyRef = "L1+Caps".parse().unwrap();
-        assert_eq!(kr.index, 3);
+        assert_eq!(kr.index, MatrixPos::new(3));
         assert_eq!(kr.layer, Layer::Layer1);
     }
 
     #[test]
     fn keyref_parse_numeric() {
         let kr: KeyRef = "42".parse().unwrap();
-        assert_eq!(kr.index, 42);
+        assert_eq!(kr.index, MatrixPos::new(42));
         assert_eq!(kr.layer, Layer::Base);
     }
 
     #[test]
     fn keyref_parse_fn_numeric() {
         let kr: KeyRef = "Fn+42".parse().unwrap();
-        assert_eq!(kr.index, 42);
+        assert_eq!(kr.index, MatrixPos::new(42));
         assert_eq!(kr.layer, Layer::Fn);
     }
 
     #[test]
     fn keyref_parse_case_insensitive() {
         let kr: KeyRef = "fn+caps".parse().unwrap();
-        assert_eq!(kr.index, 3);
+        assert_eq!(kr.index, MatrixPos::new(3));
         assert_eq!(kr.layer, Layer::Fn);
     }
 
     #[test]
     fn keyref_display_base() {
-        let kr = KeyRef::new(3, Layer::Base);
+        let kr = KeyRef::new(MatrixPos::new(3), Layer::Base);
         assert_eq!(kr.to_string(), "Caps");
     }
 
     #[test]
     fn keyref_display_fn() {
-        let kr = KeyRef::new(3, Layer::Fn);
+        let kr = KeyRef::new(MatrixPos::new(3), Layer::Fn);
         assert_eq!(kr.to_string(), "Fn+Caps");
     }
 
     #[test]
     fn keyref_display_l1() {
-        let kr = KeyRef::new(3, Layer::Layer1);
+        let kr = KeyRef::new(MatrixPos::new(3), Layer::Layer1);
         assert_eq!(kr.to_string(), "L1+Caps");
     }
 
@@ -416,9 +433,11 @@ mod tests {
         RawKeyRows {
             key_count,
             names: (0..key_count)
-                .map(|i| matrix::key_name(i as u8).to_string())
+                .map(|i| matrix::key_name(MatrixPos::new(i as u8)).to_string())
                 .collect(),
-            defaults: (0..key_count).map(|i| default_keycode(i as u8)).collect(),
+            defaults: (0..key_count)
+                .map(|i| default_keycode(MatrixPos::new(i as u8)))
+                .collect(),
             layers: [
                 to_vec(base0),
                 to_vec(base1),
@@ -452,8 +471,8 @@ mod tests {
 
         let remapped: Vec<_> = rows.iter().filter(|r| r.output_remapped[0]).collect();
         assert_eq!(remapped.len(), 1);
-        assert_eq!(remapped[0].index, 3);
-        assert_eq!(remapped[0].outputs[0], KeyAction::Key(0x04));
+        assert_eq!(remapped[0].index, MatrixPos::new(3));
+        assert_eq!(remapped[0].outputs[0], KeyAction::Key(HidUsage::new(0x04)));
         assert!(rows.iter().all(|r| !r.output_remapped[1]));
     }
 
@@ -466,7 +485,7 @@ mod tests {
         l1[3] = DEFAULTS[3]; // Layer1 bound to the same key the base emits
         let rows = build_key_rows(&make_raw(6, &DEFAULTS, &l1, &[]));
 
-        let caps = rows.iter().find(|r| r.index == 3).unwrap();
+        let caps = rows.iter().find(|r| r.index == MatrixPos::new(3)).unwrap();
         assert!(!caps.output_remapped[0], "base matches its default");
         assert!(
             caps.output_remapped[1],
@@ -480,13 +499,13 @@ mod tests {
         fn_layer[3] = [3, 0, 0xE9, 0]; // Fn+Caps -> Volume Up
         let rows = build_key_rows(&make_raw(6, &DEFAULTS, &DEFAULTS, &fn_layer));
 
-        let caps = rows.iter().find(|r| r.index == 3).unwrap();
+        let caps = rows.iter().find(|r| r.index == MatrixPos::new(3)).unwrap();
         assert_eq!(caps.fn_action, Some(KeyAction::Consumer(0x00E9)));
         assert!(caps.is_customized());
         // Empty Fn slots stay unbound rather than reading as a binding.
         assert!(rows
             .iter()
-            .filter(|r| r.index != 3)
+            .filter(|r| r.index != MatrixPos::new(3))
             .all(|r| r.fn_action.is_none()));
     }
 
@@ -496,7 +515,7 @@ mod tests {
         let mut base0 = DEFAULTS;
         base0[3] = [0, 0x29, 0, 0]; // usage in slot 1, as an older driver wrote it
         let rows = build_key_rows(&make_raw(6, &base0, &DEFAULTS, &[]));
-        let caps = rows.iter().find(|r| r.index == 3).unwrap();
+        let caps = rows.iter().find(|r| r.index == MatrixPos::new(3)).unwrap();
         assert_eq!(caps.raw[0], [0, 0x29, 0, 0]);
         assert_eq!(caps.outputs[0].to_config_bytes(), [0, 0, 0x29, 0]);
     }
@@ -507,51 +526,58 @@ mod tests {
     #[test]
     fn device_defaults_decide_what_counts_as_customised() {
         // Generic table's answer for those positions, which is wrong for the SK75.
-        assert_eq!(default_keycode(17), 0xE2, "generic table says LAlt");
+        assert_eq!(
+            default_keycode(MatrixPos::new(17)),
+            HidUsage::new(0xE2),
+            "generic table says LAlt"
+        );
 
         // Holding the device's real default is not a customisation...
-        assert!(!is_user_remap(&[0, 0, 0xE3, 0], 0xE3));
+        assert!(!is_user_remap(&[0, 0, 0xE3, 0], HidUsage::new(0xE3)));
         // ...but judging it against the generic table's default says it is.
-        assert!(is_user_remap(&[0, 0, 0xE3, 0], default_keycode(17)));
+        assert!(is_user_remap(
+            &[0, 0, 0xE3, 0],
+            default_keycode(MatrixPos::new(17))
+        ));
     }
 
     // -- is_user_remap (re-tested here for the shared version) --
 
     #[test]
     fn remap_detection_disabled() {
-        assert!(!is_user_remap(&[0, 0, 0, 0], 0x29));
+        assert!(!is_user_remap(&[0, 0, 0, 0], HidUsage::new(0x29)));
     }
 
     #[test]
     fn remap_detection_identity() {
-        assert!(!is_user_remap(&[0, 0, 0x29, 0], 0x29));
+        assert!(!is_user_remap(&[0, 0, 0x29, 0], HidUsage::new(0x29)));
     }
 
     #[test]
     fn remap_detection_changed() {
-        assert!(is_user_remap(&[0, 0, 0x04, 0], 0x39));
+        assert!(is_user_remap(&[0, 0, 0x04, 0], HidUsage::new(0x39)));
     }
 
     #[test]
     fn remap_detection_macro() {
-        assert!(is_user_remap(&[9, 0, 0, 0], 0xE0));
+        assert!(is_user_remap(&[9, 0, 0, 0], HidUsage::new(0xE0)));
     }
 
     #[test]
     fn remap_detection_fn_key() {
-        assert!(!is_user_remap(&[10, 1, 0, 0], 0xE4));
+        assert!(!is_user_remap(&[10, 1, 0, 0], HidUsage::new(0xE4)));
     }
 
     /// A slot written to the position's own factory keycode is not a remap, whichever
     /// usage slot it landed in — the old byte-1-non-zero rule called this customised.
     #[test]
     fn remap_detection_default_written_to_slot_one() {
-        assert!(!is_user_remap(&[0, 0x29, 0, 0], 0x29));
+        assert!(!is_user_remap(&[0, 0x29, 0, 0], HidUsage::new(0x29)));
     }
 
     /// A chord is always a remap: no factory position emits more than one usage.
     #[test]
     fn remap_detection_chord() {
-        assert!(is_user_remap(&[0, 0xE0, 0x06, 0], 0x06));
+        assert!(is_user_remap(&[0, 0xE0, 0x06, 0], HidUsage::new(0x06)));
     }
 }

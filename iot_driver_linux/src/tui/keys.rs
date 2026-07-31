@@ -3,6 +3,7 @@
 
 pub(in crate::tui) use crate::key_action::CONSUMER_KEYS;
 use crate::protocol::hid::key_name;
+use monsgeek_transport::protocol::HidUsage;
 
 /// Layer filter for the key-mapping views.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -36,11 +37,12 @@ impl RemapLayerView {
 
 /// Every bindable HID keyboard usage, including the modifiers `0xE0..=0xE7`
 /// (the firmware treats those as ordinary usages), sorted by name.
-pub(in crate::tui) fn all_hid_keys() -> Vec<(u8, &'static str)> {
+pub(in crate::tui) fn all_hid_keys() -> Vec<(HidUsage, &'static str)> {
     // `key_name` collapses 0x68..=0x73 to the single label "F13-F24", so those are
     // filtered out here and re-added individually.
-    let mut keys: Vec<(u8, &'static str)> = (0x04..=0x73u8)
+    let mut keys: Vec<(HidUsage, &'static str)> = (0x04..=0x73u8)
         .chain(0xE0..=0xE7)
+        .map(HidUsage::new)
         .filter_map(|code| {
             let name = key_name(code);
             (name != "?" && name != "F13-F24").then_some((code, name))
@@ -53,7 +55,7 @@ pub(in crate::tui) fn all_hid_keys() -> Vec<(u8, &'static str)> {
         F13_F24
             .iter()
             .enumerate()
-            .map(|(i, &name)| (0x68 + i as u8, name)),
+            .map(|(i, &name)| (HidUsage::new(0x68 + i as u8), name)),
     );
     keys.sort_by_key(|&(_, name)| name);
     keys

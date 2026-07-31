@@ -40,7 +40,7 @@ pub fn remap(keyboard: &KeyboardInterface, from: &str, to: &str, layer: u8) -> C
     println!(
         "Remapping {} (index {}) to {action} on {} layer...",
         display_ref,
-        key_ref.index,
+        key_ref.index.get(),
         effective_layer.name()
     );
     match keymap::set_key(keyboard, key_ref.index, effective_layer, &action) {
@@ -72,7 +72,7 @@ pub fn reset_key(keyboard: &KeyboardInterface, key: &str, layer: u8) -> CommandR
     println!(
         "Resetting {} (index {}) on {}...",
         display_ref,
-        key_ref.index,
+        key_ref.index.get(),
         effective_layer.name()
     );
     match keymap::reset_key(keyboard, key_ref.index, effective_layer) {
@@ -104,26 +104,29 @@ pub fn swap(keyboard: &KeyboardInterface, key1: &str, key2: &str, profile: u8) -
 
     match keyboard.get_keymatrix(profile, 0, 8) {
         Ok(data) => {
-            let key_a = kr_a.index;
-            let key_b = kr_b.index;
-            let code_a = if (key_a as usize) * 4 + 2 < data.len() {
-                data[(key_a as usize) * 4 + 2]
-            } else {
-                0
+            let (key_a, key_b) = (kr_a.index, kr_b.index);
+            // The keymatrix entry's usage sits at byte 2 of the 4-byte slot.
+            let usage_at = |pos: monsgeek_transport::protocol::MatrixPos| {
+                data.get(usize::from(pos) * 4 + 2)
+                    .copied()
+                    .map(monsgeek_transport::protocol::HidUsage::new)
+                    .unwrap_or(monsgeek_transport::protocol::HidUsage::NONE)
             };
-            let code_b = if (key_b as usize) * 4 + 2 < data.len() {
-                data[(key_b as usize) * 4 + 2]
-            } else {
-                0
-            };
+            let (code_a, code_b) = (usage_at(key_a), usage_at(key_b));
 
-            let name_a = keyboard.matrix_key_name(key_a as usize);
-            let name_b = keyboard.matrix_key_name(key_b as usize);
+            let name_a = keyboard.matrix_key_name(key_a.into());
+            let name_b = keyboard.matrix_key_name(key_b.into());
             let action_a = hid::key_name(code_a);
             let action_b = hid::key_name(code_b);
             println!("Swapping {name_a} ({action_a}) <-> {name_b} ({action_b})...");
 
-            match keyboard.swap_keys(profile, key_a, code_a, key_b, code_b) {
+            match keyboard.swap_keys(
+                profile,
+                key_a.get(),
+                code_a.get(),
+                key_b.get(),
+                code_b.get(),
+            ) {
                 Ok(()) => println!("Keys swapped successfully"),
                 Err(e) => eprintln!("Failed to swap keys: {e}"),
             }

@@ -4,7 +4,7 @@ use super::CommandResult;
 use iot_driver::macro_seq::MacroSeq;
 use iot_driver::protocol::hid;
 use monsgeek_keyboard::{parse_macro_events, KeyboardInterface};
-use monsgeek_transport::protocol::matrix;
+use monsgeek_transport::protocol::{matrix, HidUsage, MatrixPos};
 
 /// Get macro for a key
 pub fn get_macro(keyboard: &KeyboardInterface, key: &str) -> CommandResult {
@@ -21,7 +21,7 @@ pub fn get_macro(keyboard: &KeyboardInterface, key: &str) -> CommandResult {
                 println!("Events ({}):", events.len());
                 for (i, evt) in events.iter().enumerate() {
                     let arrow = if evt.is_down { "↓" } else { "↑" };
-                    let key_name = hid::key_name(evt.keycode);
+                    let key_name = hid::key_name(HidUsage::new(evt.keycode));
                     let delay_str = if evt.delay_ms > 0 {
                         format!(" +{}ms", evt.delay_ms)
                     } else {
@@ -134,9 +134,9 @@ pub fn assign_macro(
 
     // Resolve key name to matrix index
     let key_index = if let Ok(idx) = key.parse::<u8>() {
-        idx
-    } else if let Some(idx) = matrix::key_index_from_name(key) {
-        idx
+        MatrixPos::new(idx)
+    } else if let Some(pos) = matrix::key_index_from_name(key) {
+        pos
     } else {
         eprintln!(
             "Unknown key name: \"{key}\". Use a matrix index number or key name like F3, Esc, etc."
@@ -144,13 +144,16 @@ pub fn assign_macro(
         return Ok(());
     };
 
-    let key_name = keyboard.matrix_key_name(key_index as usize);
+    let key_name = keyboard.matrix_key_name(key_index.into());
     let layer_num: u8 = if fn_layer { 1 } else { 0 };
     let prefix = if fn_layer { "Fn+" } else { "" };
-    println!("Assigning macro {macro_index} to {prefix}{key_name} (index {key_index})...");
+    println!(
+        "Assigning macro {macro_index} to {prefix}{key_name} (index {})...",
+        key_index.get()
+    );
 
     // macro_type 0 = repeat by count
-    let result = keyboard.assign_macro_to_key(layer_num, key_index, macro_index, 0);
+    let result = keyboard.assign_macro_to_key(layer_num, key_index.get(), macro_index, 0);
     match result {
         Ok(()) => println!("Macro {macro_index} assigned to {prefix}{key_name}"),
         Err(e) => eprintln!("Failed to assign macro: {e}"),

@@ -12,7 +12,7 @@ use crate::TriggerSettings;
 use monsgeek_keyboard::{
     DksAction, DksBinding, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, ModeByte, Precision,
 };
-use monsgeek_transport::protocol::FN_WIRE_LAYER;
+use monsgeek_transport::protocol::{HidUsage, FN_WIRE_LAYER};
 
 use super::super::keys::{all_hid_keys, CONSUMER_KEYS};
 use super::super::shared::{AsyncResult, LoadState, SpinnerConfig};
@@ -330,7 +330,7 @@ pub(in crate::tui) struct TriggerEditModal {
     pub output_picker: Option<PopupSelect<KeyAction>>,
     /// Usages staged with Tab while the output picker is open, so a slot can be set
     /// to a chord (`Ctrl+C`) rather than a single key. Empty = picking one key.
-    pub chord_buf: Vec<u8>,
+    pub chord_buf: Vec<HidUsage>,
     /// The output picker's title without the chord preview, for rebuilding it.
     pub picker_title: String,
 }
@@ -1552,7 +1552,10 @@ mod tests {
     #[test]
     fn picked_action_without_staging_is_the_highlighted_row() {
         let m = modal();
-        assert_eq!(m.picked_action(KeyAction::Key(0x06)), KeyAction::Key(0x06));
+        assert_eq!(
+            m.picked_action(KeyAction::Key(HidUsage::new(0x06))),
+            KeyAction::Key(HidUsage::new(0x06))
+        );
         assert_eq!(
             m.picked_action(KeyAction::Consumer(0x00E9)),
             KeyAction::Consumer(0x00E9)
@@ -1563,19 +1566,19 @@ mod tests {
     #[test]
     fn picked_action_appends_highlighted_key_to_staged_chord() {
         let mut m = modal();
-        m.chord_buf = vec![0xE0];
+        m.chord_buf = vec![HidUsage::new(0xE0)];
         assert_eq!(
-            m.picked_action(KeyAction::Key(0x06)),
+            m.picked_action(KeyAction::Key(HidUsage::new(0x06))),
             KeyAction::Combo {
-                keys: [0xE0, 0x06, 0]
+                keys: [HidUsage::new(0xE0), HidUsage::new(0x06), HidUsage::new(0)]
             }
         );
         // Confirming on a key that is already staged must not duplicate it.
-        m.chord_buf = vec![0xE0, 0x06];
+        m.chord_buf = vec![HidUsage::new(0xE0), HidUsage::new(0x06)];
         assert_eq!(
-            m.picked_action(KeyAction::Key(0x06)),
+            m.picked_action(KeyAction::Key(HidUsage::new(0x06))),
             KeyAction::Combo {
-                keys: [0xE0, 0x06, 0]
+                keys: [HidUsage::new(0xE0), HidUsage::new(0x06), HidUsage::new(0)]
             }
         );
     }
@@ -1585,11 +1588,11 @@ mod tests {
     #[test]
     fn picked_action_ignores_non_key_highlight_while_staging() {
         let mut m = modal();
-        m.chord_buf = vec![0xE0, 0x06];
+        m.chord_buf = vec![HidUsage::new(0xE0), HidUsage::new(0x06)];
         assert_eq!(
             m.picked_action(KeyAction::Consumer(0x00E9)),
             KeyAction::Combo {
-                keys: [0xE0, 0x06, 0]
+                keys: [HidUsage::new(0xE0), HidUsage::new(0x06), HidUsage::new(0)]
             }
         );
     }

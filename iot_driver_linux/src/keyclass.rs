@@ -9,7 +9,7 @@
 //! crate stays wire-only.
 
 use crate::keymap::default_keycode;
-use monsgeek_transport::protocol::matrix;
+use monsgeek_transport::protocol::{matrix, MatrixPos};
 use std::fmt;
 use std::str::FromStr;
 
@@ -76,7 +76,7 @@ impl KeyClass {
     }
 
     /// Whether `index` belongs to this class.
-    pub fn contains(self, index: u8) -> bool {
+    pub fn contains(self, index: MatrixPos) -> bool {
         let name = matrix::key_name(index);
         if name == "?" {
             return false;
@@ -84,17 +84,18 @@ impl KeyClass {
         match self {
             Self::All => true,
             Self::Alnum => Self::Alpha.contains(index) || Self::Digit.contains(index),
-            Self::Row(n) => index % ROWS == n,
+            Self::Row(n) => index.row() == n,
             _ => content_class(index) == Some(self),
         }
     }
 
     /// Every matrix position in this class, in layout (reading) order.
-    pub fn members(self) -> Vec<u8> {
-        let mut v: Vec<u8> = (0..matrix::KEY_COUNT)
+    pub fn members(self) -> Vec<MatrixPos> {
+        let mut v: Vec<MatrixPos> = (0..matrix::KEY_COUNT)
+            .map(MatrixPos::new)
             .filter(|&i| self.contains(i))
             .collect();
-        v.sort_by_key(|&i| (i % ROWS, i / ROWS));
+        v.sort_by_key(|&i| (i.row(), i.col()));
         v
     }
 }
@@ -134,14 +135,14 @@ impl FromStr for KeyClass {
 ///
 /// The seven content classes are mutually exclusive and cover every named
 /// position, so this is a total function over the named matrix.
-pub fn content_class(index: u8) -> Option<KeyClass> {
+pub fn content_class(index: MatrixPos) -> Option<KeyClass> {
     let name = matrix::key_name(index);
     if name == "?" {
         return None;
     }
     // Modifiers first: the HID table already knows which positions default to a
     // modifier usage, so only Fn — which has no HID code — needs naming.
-    if name == "Fn" || (0xE0..=0xE7).contains(&default_keycode(index)) {
+    if name == "Fn" || default_keycode(index).is_modifier() {
         return Some(KeyClass::Modifier);
     }
     if NAVIGATION.contains(&name) {
@@ -203,25 +204,25 @@ pub struct KeySelector {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Term {
     Class(KeyClass),
-    Index(u8),
+    Index(MatrixPos),
     Range(u8, u8),
 }
 
 impl KeySelector {
     /// Matrix positions this term selects.
-    fn members(&self) -> Vec<u8> {
+    fn members(&self) -> Vec<MatrixPos> {
         match self.term {
             Term::Class(c) => c.members(),
             Term::Index(i) => vec![i],
-            Term::Range(a, b) => (a..=b).collect(),
+            Term::Range(a, b) => (a..=b).map(MatrixPos::new).collect(),
         }
     }
 
     /// Resolve a whole selector list: the union of the positive terms (or every
     /// named position when there are none) minus the union of the negated ones.
-    pub fn resolve(selectors: &[KeySelector]) -> Vec<u8> {
+    pub fn resolve(selectors: &[KeySelector]) -> Vec<MatrixPos> {
         let positive: Vec<&KeySelector> = selectors.iter().filter(|s| !s.negated).collect();
-        let mut keys: Vec<u8> = if positive.is_empty() {
+        let mut keys: Vec<MatrixPos> = if positive.is_empty() {
             KeyClass::All.members()
         } else {
             positive.iter().flat_map(|s| s.members()).collect()
@@ -230,7 +231,7 @@ impl KeySelector {
             let drop = excluded.members();
             keys.retain(|k| !drop.contains(k));
         }
-        keys.sort_by_key(|&i| (i % ROWS, i / ROWS));
+        keys.sort_by_key(|&i| (i.row(), i.col()));
         keys.dedup();
         keys
     }
@@ -275,7 +276,7 @@ impl FromStr for KeySelector {
                 .map_err(|_| format!("\"{body}\" is not a matrix position"))?;
             return Ok(Self {
                 negated,
-                term: Term::Index(index),
+                term: Term::Index(MatrixPos::new(index)),
             });
         }
 
@@ -290,10 +291,10 @@ impl FromStr for KeySelector {
             .find(|(alias, _)| alias.eq_ignore_ascii_case(body))
             .map(|&(_, name)| name)
             .unwrap_or(body);
-        if let Some(index) = matrix::key_index_from_name(aliased) {
+        if let Some(pos) = matrix::key_index_from_name(aliased) {
             return Ok(Self {
                 negated,
-                term: Term::Index(index),
+                term: Term::Index(pos),
             });
         }
         Err(format!(
@@ -315,7 +316,8 @@ mod tests {
     /// name is added to the matrix table without a home, this fails.
     #[test]
     fn classes_partition_named_positions() {
-        let named: Vec<u8> = (0..matrix::KEY_COUNT)
+        let named: Vec<MatrixPos> = (0..matrix::KEY_COUNT)
+            .map(MatrixPos::new)
             .filter(|&i| matrix::key_name(i) != "?")
             .collect();
         let mut total = 0;
@@ -325,8 +327,9 @@ mod tests {
                 assert_eq!(
                     content_class(i),
                     Some(class),
-                    "{} ({i}) claimed by two classes",
-                    matrix::key_name(i)
+                    "{} ({}) claimed by two classes",
+                    matrix::key_name(i),
+                    i.get()
                 );
             }
             total += members.len();
@@ -355,7 +358,7 @@ mod tests {
         assert_eq!(content_class(fn_index), Some(KeyClass::Modifier));
     }
 
-    fn resolve(spec: &str) -> Vec<u8> {
+    fn resolve(spec: &str) -> Vec<MatrixPos> {
         let sels: Vec<KeySelector> = spec
             .split(',')
             .map(|t| t.parse().unwrap_or_else(|e| panic!("{t}: {e}")))
@@ -380,7 +383,7 @@ mod tests {
             resolve("9"),
             vec![matrix::key_index_from_name("9").unwrap()]
         );
-        assert_eq!(resolve("#9"), vec![9]);
+        assert_eq!(resolve("#9"), vec![MatrixPos::new(9)]);
         assert_ne!(resolve("9"), resolve("#9"));
     }
 
@@ -423,7 +426,7 @@ mod tests {
     fn rows_are_selectable() {
         // Row 0 is the F-row: F1..F12 plus Esc and Del.
         let row0 = KeyClass::Row(0).members();
-        assert!(row0.iter().all(|&i| i % ROWS == 0));
+        assert!(row0.iter().all(|&i| i.row() == 0));
         assert!(row0.contains(&matrix::key_index_from_name("F1").unwrap()));
     }
 }

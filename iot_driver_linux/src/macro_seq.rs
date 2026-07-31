@@ -15,6 +15,7 @@
 
 use crate::key_action::ParseKeyActionError;
 use crate::protocol::hid;
+use monsgeek_transport::protocol::HidUsage;
 use std::fmt;
 use std::str::FromStr;
 
@@ -163,12 +164,16 @@ fn parse_key_spec(s: &str) -> Result<(u8, u8), ParseMacroSeqError> {
                 .ok_or_else(|| ParseKeyActionError::UnknownKey(part.to_string()))?;
         }
         let key_str = parts.last().unwrap().trim();
+        // Macro steps are replayed as raw HID reports, so this domain works in
+        // report bytes; the usage newtype is unwrapped at the lookup boundary.
         let key = hid::key_code_from_name(key_str)
-            .ok_or_else(|| ParseKeyActionError::UnknownKey(key_str.to_string()))?;
+            .ok_or_else(|| ParseKeyActionError::UnknownKey(key_str.to_string()))?
+            .get();
         Ok((mod_bits, key))
     } else {
         let key = hid::key_code_from_name(s)
-            .ok_or_else(|| ParseKeyActionError::UnknownKey(s.to_string()))?;
+            .ok_or_else(|| ParseKeyActionError::UnknownKey(s.to_string()))?
+            .get();
         Ok((0, key))
     }
 }
@@ -267,7 +272,7 @@ fn resolve_single_key(name: &str) -> Result<u8, ParseMacroSeqError> {
 
     // Try direct key code lookup first
     if let Some(code) = hid::key_code_from_name(name) {
-        return Ok(code);
+        return Ok(code.get());
     }
 
     // Map modifier names to their HID keycodes
@@ -542,7 +547,7 @@ fn try_match_combo(events: &[(u8, bool, u16)], default_delay: u16) -> Option<(Ma
 
 /// Format a key name for display, using the HID name.
 fn fmt_key(code: u8) -> &'static str {
-    hid::key_name(code)
+    hid::key_name(HidUsage::new(code))
 }
 
 /// Format a modifier bitmask as `Ctrl+Shift+...` prefix.

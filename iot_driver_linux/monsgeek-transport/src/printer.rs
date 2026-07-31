@@ -437,12 +437,8 @@ impl Printer {
                         .enumerate()
                         .filter(|(_, &v)| v >= 300)
                         .map(|(i, _)| {
-                            let key_idx = (base_idx + i) as u8;
-                            format!(
-                                "{}({})",
-                                crate::protocol::matrix::key_name(key_idx),
-                                key_idx
-                            )
+                            let key_idx = crate::protocol::MatrixPos::new((base_idx + i) as u8);
+                            format!("{}({})", key_idx.name(), key_idx.get())
                         })
                         .collect();
                     format!(

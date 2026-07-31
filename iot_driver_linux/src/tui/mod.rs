@@ -1609,7 +1609,7 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                         KeyCode::Enter | KeyCode::Char('e') if app.tab == 2 => {
                             let visible = tabs::key_mapping::visible_indices(&app);
                             if let Some(&ri) = visible.get(app.key_mapping_selected) {
-                                let idx = app.key_rows[ri].index as usize;
+                                let idx = usize::from(app.key_rows[ri].index);
                                 app.open_trigger_edit_key(idx);
                             }
                         }

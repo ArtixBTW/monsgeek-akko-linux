@@ -11,7 +11,7 @@ use crate::keyclass::KeyClass;
 use crate::keymap::KeyRow;
 use crate::tui::keys::RemapLayerView;
 use monsgeek_keyboard::{KeyMode, ModeByte};
-use monsgeek_transport::protocol::matrix;
+use monsgeek_transport::protocol::{matrix, MatrixPos};
 
 use super::super::shared::LoadState;
 use super::super::App;
@@ -170,8 +170,8 @@ pub(in crate::tui) fn visible_indices(app: &App) -> Vec<usize> {
         .collect();
     match app.key_mapping_sort {
         KmSort::Layout => v.sort_by_key(|&i| {
-            let idx = app.key_rows[i].index as u16;
-            (idx % 6, idx / 6)
+            let pos = app.key_rows[i].index;
+            (pos.row(), pos.col())
         }),
         KmSort::Alpha => {
             v.sort_by(|&a, &b| {
@@ -264,7 +264,7 @@ fn extra_text(row: &KeyRow, factor: f32, names: &[String]) -> String {
                 let name = names.get(p as usize).filter(|n| !n.is_empty());
                 match name {
                     Some(n) => format!("↔{n}"),
-                    None => format!("↔{}", matrix::key_name(p)),
+                    None => format!("↔{}", matrix::key_name(MatrixPos::new(p))),
                 }
             })
             .unwrap_or_else(|| "unbound".into()),
@@ -353,7 +353,7 @@ fn render_key_mapping_list(f: &mut Frame, app: &mut App, area: Rect) {
         .map(|&ri| {
             let r = &app.key_rows[ri];
             let texts = [
-                r.index.to_string(),
+                r.index.get().to_string(),
                 r.position.to_string(),
                 ModeByte::new(r.mode, r.rapid_trigger).to_string(),
                 output_text(r, RemapLayerView::L0),
@@ -438,7 +438,7 @@ fn render_key_mapping_layout(f: &mut Frame, app: &mut App, area: Rect) {
     let sel_pos = visible
         .get(app.key_mapping_selected)
         .map(|&ri| app.key_rows[ri].index);
-    let visible_set: std::collections::HashSet<u8> =
+    let visible_set: std::collections::HashSet<MatrixPos> =
         visible.iter().map(|&ri| app.key_rows[ri].index).collect();
 
     let chunks = Layout::default()
@@ -459,8 +459,8 @@ fn render_key_mapping_layout(f: &mut Frame, app: &mut App, area: Rect) {
         if r.position.is_empty() || r.position == "?" {
             continue;
         }
-        let col = r.index as u16 / 6;
-        let row = r.index as u16 % 6;
+        let col = r.index.col() as u16;
+        let row = r.index.row() as u16;
         let x = inner.x + col * key_w;
         let y = inner.y + row * key_h;
         if x + key_w > inner.x + inner.width || y + key_h > inner.y + inner.height {
@@ -537,15 +537,15 @@ pub(in crate::tui) fn layout_move(app: &mut App, dcol: i32, drow: i32) {
     let Some(&cur_ri) = visible.get(app.key_mapping_selected) else {
         return;
     };
-    let cur = app.key_rows[cur_ri].index as i32;
-    let (col, row) = (cur / 6, cur % 6);
+    let cur = app.key_rows[cur_ri].index;
+    let (col, row) = (cur.col() as i32, cur.row() as i32);
     // Search outward in the requested direction for the next visible key.
     for step in 1..=21i32 {
         let (c, r) = (col + dcol * step, row + drow * step);
         if !(0..21).contains(&c) || !(0..6).contains(&r) {
             break;
         }
-        let target = (c * 6 + r) as u8;
+        let target = MatrixPos::new((c * 6 + r) as u8);
         if let Some(vi) = visible
             .iter()
             .position(|&ri| app.key_rows[ri].index == target)

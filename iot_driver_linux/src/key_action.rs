@@ -21,6 +21,7 @@
 //! ```
 
 use crate::protocol::hid;
+use monsgeek_transport::protocol::HidUsage;
 use std::fmt;
 use std::str::FromStr;
 
@@ -123,7 +124,7 @@ pub enum KeyAction {
     /// Disabled / no action (config_type=0, keycode=0).
     Disabled,
     /// Single HID keycode (config_type=0).
-    Key(u8),
+    Key(HidUsage),
     /// A chord of 2–3 HID usages pressed together (config_type=0).
     ///
     /// A keymatrix slot holds **three independent usage codes** in `b1`/`b2`/`b3`,
@@ -134,7 +135,7 @@ pub enum KeyAction {
     /// `[0, skey, key, key2]`.
     ///
     /// Trailing unused slots are zero; use [`KeyAction::chord`] to build one.
-    Combo { keys: [u8; 3] },
+    Combo { keys: [HidUsage; 3] },
     /// Mouse button (config_type=1).
     Mouse(u8),
     /// Macro assignment (config_type=9).
@@ -168,32 +169,19 @@ pub enum KeyAction {
     Unknown { config_type: u8, data: [u8; 3] },
 }
 
-/// Whether a keymatrix usage slot actually produces a keypress.
-///
-/// Firmware `hid_key_press` (v407 @ 0x080078f4) accepts `0xE0..=0xE7` as modifier
-/// usages and returns early for anything below `0x04`, so `0x00..=0x03` are no-ops.
-/// Slots holding those are dropped on decode: an older release of this driver wrote
-/// a modifier *bitmask* into `b1`, and e.g. `[0, 0x01, 0x06, 0]` really does emit a
-/// bare "C" on the device. Decoding it as `Key(C)` reports what the key does, and
-/// the stale byte is rewritten canonically the next time the key is edited.
-fn usage_is_live(usage: u8) -> bool {
-    usage >= 0x04
-}
-
-/// HID usages `0xE0..=0xE7`, which `hid_key_press` folds into the report's
-/// modifier byte instead of a key slot.
-fn is_modifier_usage(usage: u8) -> bool {
-    (0xE0..=0xE7).contains(&usage)
-}
-
+// Slots whose usage is not live (see `HidUsage::is_live`) are dropped on decode: an
+// older release of this driver wrote a modifier *bitmask* into `b1`, and e.g.
+// `[0, 0x01, 0x06, 0]` really does emit a bare "C" on the device. Decoding it as
+// `Key(C)` reports what the key does, and the stale byte is rewritten canonically
+// the next time the key is edited.
 impl KeyAction {
     /// Encode to the 4-byte config format used in GET/SET_KEYMATRIX.
     pub fn to_config_bytes(self) -> [u8; 4] {
         match self {
             KeyAction::Disabled => [0, 0, 0, 0],
             // A lone usage goes in b2, matching the vendor's `hidToMatrix`.
-            KeyAction::Key(code) => [0, 0, code, 0],
-            KeyAction::Combo { keys } => [0, keys[0], keys[1], keys[2]],
+            KeyAction::Key(code) => [0, 0, code.get(), 0],
+            KeyAction::Combo { keys } => [0, keys[0].get(), keys[1].get(), keys[2].get()],
             KeyAction::Mouse(btn) => [config_type::MOUSE, 0, btn, 0],
             KeyAction::Consumer(code) => [config_type::CONSUMER, 0, code as u8, (code >> 8) as u8],
             KeyAction::Macro { index, kind } => [config_type::MACRO, kind, index, 0],
@@ -213,11 +201,11 @@ impl KeyAction {
     /// Build the canonical action for a set of HID usages pressed together,
     /// ignoring zeros and firmware no-ops. Extra usages beyond three are dropped —
     /// the wire format has exactly three slots.
-    pub fn chord(usages: impl IntoIterator<Item = u8>) -> Self {
-        let mut keys = [0u8; 3];
+    pub fn chord(usages: impl IntoIterator<Item = HidUsage>) -> Self {
+        let mut keys = [HidUsage::NONE; 3];
         let mut n = 0;
         for u in usages {
-            if !usage_is_live(u) || n == keys.len() {
+            if !u.is_live() || n == keys.len() {
                 continue;
             }
             keys[n] = u;
@@ -241,7 +229,7 @@ impl KeyAction {
     pub fn from_config_bytes(bytes: [u8; 4]) -> Self {
         match bytes[0] {
             // Slot order b1, b2, b3 mirrors the vendor's [0, skey, key, key2].
-            config_type::KEY => KeyAction::chord([bytes[1], bytes[2], bytes[3]]),
+            config_type::KEY => KeyAction::chord([bytes[1], bytes[2], bytes[3]].map(HidUsage::new)),
             config_type::MOUSE => KeyAction::Mouse(bytes[2]),
             config_type::CONSUMER => {
                 let code = bytes[2] as u16 | (bytes[3] as u16) << 8;
@@ -283,16 +271,14 @@ impl KeyAction {
     /// The usage this action is "about": the first non-modifier slot, falling back
     /// to the first live slot. A chord has no single canonical key on the wire — all
     /// its slots are pressed — so this is for labelling and lookup only.
-    pub fn primary_usage(&self) -> Option<u8> {
-        let keys: &[u8] = match self {
+    pub fn primary_usage(&self) -> Option<HidUsage> {
+        let keys: &[HidUsage] = match self {
             KeyAction::Key(code) => return Some(*code),
             KeyAction::Combo { keys } => keys,
             _ => return None,
         };
-        let live = || keys.iter().copied().filter(|&u| usage_is_live(u));
-        live()
-            .find(|u| !is_modifier_usage(*u))
-            .or_else(|| live().next())
+        let live = || keys.iter().copied().filter(|&u| u.is_live());
+        live().find(|u| !u.is_modifier()).or_else(|| live().next())
     }
 }
 
@@ -303,7 +289,7 @@ impl fmt::Display for KeyAction {
             KeyAction::Key(code) => write!(f, "{}", hid::key_name(*code)),
             KeyAction::Combo { keys } => {
                 let mut first = true;
-                for &usage in keys.iter().filter(|&&u| usage_is_live(u)) {
+                for &usage in keys.iter().filter(|&&u| u.is_live()) {
                     if !first {
                         write!(f, "+")?;
                     }
@@ -493,10 +479,11 @@ impl FromStr for KeyAction {
         if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
             let code =
                 u8::from_str_radix(hex, 16).map_err(|_| ParseKeyActionError::InvalidHexCode)?;
-            return Ok(if code == 0 {
+            let usage = HidUsage::new(code);
+            return Ok(if usage == HidUsage::NONE {
                 KeyAction::Disabled
             } else {
-                KeyAction::Key(code)
+                KeyAction::Key(usage)
             });
         }
 
@@ -552,7 +539,7 @@ impl FromStr for KeyAction {
         // Plain key name: "A", "Enter", "F3", "CapsLock"
         let code = hid::key_code_from_name(s)
             .ok_or_else(|| ParseKeyActionError::UnknownKey(s.to_string()))?;
-        Ok(if code == 0 {
+        Ok(if code == HidUsage::NONE {
             KeyAction::Disabled
         } else {
             KeyAction::Key(code)
@@ -579,27 +566,66 @@ mod tests {
 
     #[test]
     fn parse_plain_key() {
-        assert_eq!("A".parse::<KeyAction>().unwrap(), KeyAction::Key(0x04));
-        assert_eq!("a".parse::<KeyAction>().unwrap(), KeyAction::Key(0x04));
-        assert_eq!("Enter".parse::<KeyAction>().unwrap(), KeyAction::Key(0x28));
-        assert_eq!("Escape".parse::<KeyAction>().unwrap(), KeyAction::Key(0x29));
-        assert_eq!("Esc".parse::<KeyAction>().unwrap(), KeyAction::Key(0x29));
-        assert_eq!("F3".parse::<KeyAction>().unwrap(), KeyAction::Key(0x3C));
-        assert_eq!("F12".parse::<KeyAction>().unwrap(), KeyAction::Key(0x45));
-        assert_eq!("Space".parse::<KeyAction>().unwrap(), KeyAction::Key(0x2C));
+        assert_eq!(
+            "A".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x04))
+        );
+        assert_eq!(
+            "a".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x04))
+        );
+        assert_eq!(
+            "Enter".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x28))
+        );
+        assert_eq!(
+            "Escape".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x29))
+        );
+        assert_eq!(
+            "Esc".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x29))
+        );
+        assert_eq!(
+            "F3".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x3C))
+        );
+        assert_eq!(
+            "F12".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x45))
+        );
+        assert_eq!(
+            "Space".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x2C))
+        );
     }
 
     #[test]
     fn parse_hex() {
-        assert_eq!("0x04".parse::<KeyAction>().unwrap(), KeyAction::Key(0x04));
-        assert_eq!("0x29".parse::<KeyAction>().unwrap(), KeyAction::Key(0x29));
-        assert_eq!("0xE0".parse::<KeyAction>().unwrap(), KeyAction::Key(0xE0));
+        assert_eq!(
+            "0x04".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x04))
+        );
+        assert_eq!(
+            "0x29".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x29))
+        );
+        assert_eq!(
+            "0xE0".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0xE0))
+        );
     }
 
     #[test]
     fn parse_f13_through_f24() {
-        assert_eq!("F13".parse::<KeyAction>().unwrap(), KeyAction::Key(0x68));
-        assert_eq!("F24".parse::<KeyAction>().unwrap(), KeyAction::Key(0x73));
+        assert_eq!(
+            "F13".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x68))
+        );
+        assert_eq!(
+            "F24".parse::<KeyAction>().unwrap(),
+            KeyAction::Key(HidUsage::new(0x73))
+        );
     }
 
     #[test]
@@ -607,19 +633,27 @@ mod tests {
         assert_eq!(
             "Ctrl+C".parse::<KeyAction>().unwrap(),
             KeyAction::Combo {
-                keys: [0xE0, 0x06, 0]
+                keys: [HidUsage::new(0xE0), HidUsage::new(0x06), HidUsage::new(0)]
             }
         );
         assert_eq!(
             "Shift+Alt+F3".parse::<KeyAction>().unwrap(),
             KeyAction::Combo {
-                keys: [0xE1, 0xE2, 0x3C]
+                keys: [
+                    HidUsage::new(0xE1),
+                    HidUsage::new(0xE2),
+                    HidUsage::new(0x3C)
+                ]
             }
         );
         assert_eq!(
             "RCtrl+RShift+A".parse::<KeyAction>().unwrap(),
             KeyAction::Combo {
-                keys: [0xE4, 0xE5, 0x04]
+                keys: [
+                    HidUsage::new(0xE4),
+                    HidUsage::new(0xE5),
+                    HidUsage::new(0x04)
+                ]
             }
         );
     }
@@ -691,23 +725,27 @@ mod tests {
 
     #[test]
     fn display_key() {
-        assert_eq!(KeyAction::Key(0x04).to_string(), "A");
-        assert_eq!(KeyAction::Key(0x29).to_string(), "Escape");
-        assert_eq!(KeyAction::Key(0x28).to_string(), "Enter");
+        assert_eq!(KeyAction::Key(HidUsage::new(0x04)).to_string(), "A");
+        assert_eq!(KeyAction::Key(HidUsage::new(0x29)).to_string(), "Escape");
+        assert_eq!(KeyAction::Key(HidUsage::new(0x28)).to_string(), "Enter");
     }
 
     #[test]
     fn display_combo() {
         assert_eq!(
             KeyAction::Combo {
-                keys: [0xE0, 0x06, 0]
+                keys: [HidUsage::new(0xE0), HidUsage::new(0x06), HidUsage::new(0)]
             }
             .to_string(),
             "LCtrl+C"
         );
         assert_eq!(
             KeyAction::Combo {
-                keys: [0xE1, 0xE2, 0x3C]
+                keys: [
+                    HidUsage::new(0xE1),
+                    HidUsage::new(0xE2),
+                    HidUsage::new(0x3C)
+                ]
             }
             .to_string(),
             "LShift+LAlt+F3"
@@ -764,7 +802,7 @@ mod tests {
 
     #[test]
     fn wire_roundtrip_key() {
-        let a = KeyAction::Key(0x04);
+        let a = KeyAction::Key(HidUsage::new(0x04));
         assert_eq!(a.to_config_bytes(), [0, 0, 0x04, 0]);
         assert_eq!(KeyAction::from_config_bytes(a.to_config_bytes()), a);
     }
@@ -774,18 +812,22 @@ mod tests {
         // Firmware stores user remaps with keycode at byte 1 (byte 2 = 0)
         assert_eq!(
             KeyAction::from_config_bytes([0, 0x04, 0, 0]),
-            KeyAction::Key(0x04) // A
+            KeyAction::Key(HidUsage::new(0x04)) // A
         );
         assert_eq!(
             KeyAction::from_config_bytes([0, 0x29, 0, 0]),
-            KeyAction::Key(0x29) // Escape
+            KeyAction::Key(HidUsage::new(0x29)) // Escape
         );
     }
 
     #[test]
     fn wire_roundtrip_combo() {
         let a = KeyAction::Combo {
-            keys: [0xE0, 0xE1, 0x06],
+            keys: [
+                HidUsage::new(0xE0),
+                HidUsage::new(0xE1),
+                HidUsage::new(0x06),
+            ],
         };
         assert_eq!(a.to_config_bytes(), [0, 0xE0, 0xE1, 0x06]);
         assert_eq!(KeyAction::from_config_bytes(a.to_config_bytes()), a);
@@ -812,14 +854,14 @@ mod tests {
     fn legacy_bitmask_bytes_decode_to_what_the_key_emits() {
         assert_eq!(
             KeyAction::from_config_bytes([0, 0x01, 0x06, 0]),
-            KeyAction::Key(0x06)
+            KeyAction::Key(HidUsage::new(0x06))
         );
         // LAlt's old bitmask 0x04 collides with a real usage ("A"), so that one
         // stays a chord — it is genuinely what the firmware presses.
         assert_eq!(
             KeyAction::from_config_bytes([0, 0x04, 0x06, 0]),
             KeyAction::Combo {
-                keys: [0x04, 0x06, 0]
+                keys: [HidUsage::new(0x04), HidUsage::new(0x06), HidUsage::new(0)]
             }
         );
     }
@@ -829,7 +871,7 @@ mod tests {
     /// 0x68..=0x73 to a single "F13-F24" label).
     #[test]
     fn parse_display_roundtrip_over_every_usage() {
-        for code in (0x04..=0x73u8).chain(0xE0..=0xE7) {
+        for code in (0x04..=0x73u8).chain(0xE0..=0xE7).map(HidUsage::new) {
             let name = hid::key_name(code);
             if name == "?" {
                 continue;
@@ -838,7 +880,8 @@ mod tests {
             assert_eq!(
                 name.parse::<KeyAction>().unwrap(),
                 action,
-                "{name} ({code:#04x}) did not parse back"
+                "{name} ({:#04x}) did not parse back",
+                code.get()
             );
             assert_eq!(action.to_string(), name);
         }

@@ -5,7 +5,7 @@
 //! with custom serde that serializes as bare key name strings (e.g. `"W"`)
 //! and accepts both the new format and the old `{ key_index, label }` format.
 
-use monsgeek_transport::protocol::{matrix, KeyRef, Layer};
+use monsgeek_transport::protocol::{matrix, KeyRef, Layer, MatrixPos};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::path::PathBuf;
 
@@ -76,14 +76,16 @@ fn deserialize_keyref<'de, D: Deserializer<'de>>(d: D) -> Result<KeyRef, D::Erro
             if let Some(idx) = matrix::key_index_from_name(&name) {
                 Ok(KeyRef::new(idx, Layer::Base))
             } else if let Ok(idx) = name.parse::<u8>() {
-                Ok(KeyRef::new(idx, Layer::Base))
+                Ok(KeyRef::new(MatrixPos::new(idx), Layer::Base))
             } else {
                 Err(serde::de::Error::custom(format!(
                     "unknown key name: \"{name}\""
                 )))
             }
         }
-        KeyRefRepr::Legacy { key_index, .. } => Ok(KeyRef::new(key_index, Layer::Base)),
+        KeyRefRepr::Legacy { key_index, .. } => {
+            Ok(KeyRef::new(MatrixPos::new(key_index), Layer::Base))
+        }
     }
 }
 
@@ -124,8 +126,8 @@ impl AxisMappingMode {
             AxisMappingMode::TwoKey {
                 positive_key,
                 negative_key,
-            } => vec![positive_key.index, negative_key.index],
-            AxisMappingMode::SingleKey { key, .. } => vec![key.index],
+            } => vec![positive_key.index.get(), negative_key.index.get()],
+            AxisMappingMode::SingleKey { key, .. } => vec![key.index.get()],
         }
     }
 }
@@ -212,8 +214,8 @@ impl Default for JoystickConfig {
                     id: AxisId::X,
                     enabled: true,
                     mapping: AxisMappingMode::TwoKey {
-                        positive_key: KeyRef::new(21, Layer::Base),
-                        negative_key: KeyRef::new(9, Layer::Base),
+                        positive_key: KeyRef::new(MatrixPos::new(21), Layer::Base),
+                        negative_key: KeyRef::new(MatrixPos::new(9), Layer::Base),
                     },
                     calibration: AxisCalibration::default(),
                 },
@@ -221,8 +223,8 @@ impl Default for JoystickConfig {
                     id: AxisId::Y,
                     enabled: true,
                     mapping: AxisMappingMode::TwoKey {
-                        positive_key: KeyRef::new(14, Layer::Base),
-                        negative_key: KeyRef::new(15, Layer::Base),
+                        positive_key: KeyRef::new(MatrixPos::new(14), Layer::Base),
+                        negative_key: KeyRef::new(MatrixPos::new(15), Layer::Base),
                     },
                     calibration: AxisCalibration::default(),
                 },
@@ -310,8 +312,8 @@ mod tests {
             negative_key,
         } = &parsed.axes[0].mapping
         {
-            assert_eq!(positive_key.index, 21); // D
-            assert_eq!(negative_key.index, 9); // A
+            assert_eq!(positive_key.index, MatrixPos::new(21)); // D
+            assert_eq!(negative_key.index, MatrixPos::new(9)); // A
         } else {
             panic!("Expected TwoKey mapping");
         }
@@ -351,9 +353,9 @@ curve_exponent = 1.0
             negative_key,
         } = &config.axes[0].mapping
         {
-            assert_eq!(positive_key.index, 21);
+            assert_eq!(positive_key.index, MatrixPos::new(21));
             assert_eq!(positive_key.position, "D");
-            assert_eq!(negative_key.index, 9);
+            assert_eq!(negative_key.index, MatrixPos::new(9));
             assert_eq!(negative_key.position, "A");
         } else {
             panic!("Expected TwoKey mapping");
@@ -387,9 +389,9 @@ curve_exponent = 1.0
             negative_key,
         } = &config.axes[0].mapping
         {
-            assert_eq!(positive_key.index, 21);
+            assert_eq!(positive_key.index, MatrixPos::new(21));
             assert_eq!(positive_key.position, "D");
-            assert_eq!(negative_key.index, 9);
+            assert_eq!(negative_key.index, MatrixPos::new(9));
             assert_eq!(negative_key.position, "A");
         } else {
             panic!("Expected TwoKey mapping");

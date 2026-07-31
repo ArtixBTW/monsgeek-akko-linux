@@ -5,7 +5,7 @@
 //! single source of truth for matrix position → key name mapping.
 
 use crate::tui::app::App;
-use monsgeek_transport::protocol::matrix;
+use monsgeek_transport::protocol::{matrix, MatrixPos};
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
@@ -21,7 +21,7 @@ const LAYOUT_ROWS: usize = 6;
 ///
 /// Delegates to `matrix::key_name()` and maps `"?"` to `""` for unused slots.
 pub fn get_key_name(index: u8) -> &'static str {
-    let name = matrix::key_name(index);
+    let name = matrix::key_name(MatrixPos::new(index));
     if name == "?" {
         ""
     } else {
@@ -127,7 +127,8 @@ pub fn render_keyboard_layout(frame: &mut Frame, app: &App, area: Rect) {
 ///
 /// Delegates to the matrix module's canonical lookup.
 pub fn find_key_by_name(name: &str) -> Option<u8> {
-    matrix::key_index_from_name(name)
+    // The joystick's depth samples are indexed by raw position, so unwrap here.
+    matrix::key_index_from_name(name).map(MatrixPos::get)
 }
 
 #[cfg(test)]
@@ -148,7 +149,7 @@ mod tests {
         // "?" positions in the matrix should map to empty string for display
         assert_eq!(get_key_name(23), ""); // Col 3 row 5 — unused
         assert_eq!(get_key_name(29), ""); // Col 4 row 5 — unused
-        assert_eq!(matrix::key_name(23), "?");
+        assert_eq!(matrix::key_name(MatrixPos::new(23)), "?");
     }
 
     #[test]

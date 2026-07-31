@@ -206,6 +206,104 @@ pub mod magnetism {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Key index spaces
+// ---------------------------------------------------------------------------
+
+/// Where a key sits in the scan matrix (column-major, `col * 6 + row`).
+///
+/// Deliberately not interchangeable with [`HidUsage`]: `matrix::key_name` and
+/// `hid::key_name` have the same shape and opposite meanings, and swapping them
+/// compiles and returns a wrong-but-plausible name. Distinct from the LED grid
+/// position (`row * 16 + col`) and the WS2812 strip index, which are two further
+/// index spaces over the same physical keys.
+///
+/// There is no `From<u8>` on purpose — construction is `MatrixPos::new`, so every
+/// crossing from an untyped integer stays greppable.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct MatrixPos(u8);
+
+impl MatrixPos {
+    pub const fn new(pos: u8) -> Self {
+        Self(pos)
+    }
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// Physical row within the column-major matrix.
+    pub const fn row(self) -> u8 {
+        self.0 % matrix::ROWS
+    }
+
+    /// Physical column.
+    pub const fn col(self) -> u8 {
+        self.0 / matrix::ROWS
+    }
+
+    /// Generic name for this position, or `"?"` where the matrix has a gap.
+    ///
+    /// Deliberately not a `Display` impl: a board's own name for a position can
+    /// differ from the generic table's (the bug fixed in `2550596`), so a print
+    /// site has to say whether it wants this name, a device-resolved one, or the
+    /// number.
+    pub fn name(self) -> &'static str {
+        matrix::key_name(self)
+    }
+}
+
+impl From<MatrixPos> for u8 {
+    fn from(p: MatrixPos) -> Self {
+        p.0
+    }
+}
+
+impl From<MatrixPos> for usize {
+    fn from(p: MatrixPos) -> Self {
+        p.0 as usize
+    }
+}
+
+/// A USB HID keyboard usage code — what a key *emits*, as opposed to where it sits.
+///
+/// Modifiers are ordinary usages `0xE0..=0xE7`; the firmware derives the report's
+/// modifier bits from them. A HID *report* modifier bitmask is a different thing
+/// again and lives privately in `macro_seq`.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct HidUsage(u8);
+
+impl HidUsage {
+    pub const NONE: Self = Self(0);
+
+    pub const fn new(code: u8) -> Self {
+        Self(code)
+    }
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// Usages below 0x04 are reserved error codes; the firmware's `hid_key_press`
+    /// returns early for them, so a slot holding one emits nothing.
+    pub const fn is_live(self) -> bool {
+        self.0 >= 0x04
+    }
+
+    /// `0xE0..=0xE7`, which fold into the report's modifier byte rather than a key slot.
+    pub const fn is_modifier(self) -> bool {
+        0xE0 <= self.0 && self.0 <= 0xE7
+    }
+}
+
+impl From<HidUsage> for u8 {
+    fn from(u: HidUsage) -> Self {
+        u.0
+    }
+}
+
 /// Key matrix position to name mapping (M1 V5 / SG9000 layout)
 ///
 /// Column-major order, 6 rows per column.  Verified against firmware
@@ -235,24 +333,31 @@ pub mod matrix {
         "?", "Home", "PgUp", "PgDn", "End", "Right",
     ];
 
+    use super::MatrixPos;
+
+    /// Rows per column in the column-major matrix.
+    pub const ROWS: u8 = 6;
+
     /// Number of matrix positions the name table covers. Positions beyond this
     /// exist on some boards (encoders, for one) but have no generic name.
     pub const KEY_COUNT: u8 = KEY_NAMES.len() as u8;
 
-    /// Get key name from matrix position
-    pub fn key_name(index: u8) -> &'static str {
-        KEY_NAMES.get(index as usize).copied().unwrap_or("?")
+    /// Generic name for a matrix position, `"?"` for gaps.
+    pub fn key_name(pos: MatrixPos) -> &'static str {
+        KEY_NAMES.get(pos.get() as usize).copied().unwrap_or("?")
     }
 
-    /// Look up matrix index from key name (case-insensitive)
+    /// Look up a matrix position by key name (case-insensitive).
     ///
-    /// Returns None if no matching key name is found.
-    pub fn key_index_from_name(name: &str) -> Option<u8> {
+    /// Returns None if no matching key name is found. Note the sibling
+    /// `hid::key_code_from_name`, which takes the same input and returns a
+    /// [`HidUsage`](super::HidUsage) instead — the two are not interchangeable.
+    pub fn key_index_from_name(name: &str) -> Option<MatrixPos> {
         let name_lower = name.to_ascii_lowercase();
         KEY_NAMES
             .iter()
             .position(|&n| n.to_ascii_lowercase() == name_lower && n != "?")
-            .map(|i| i as u8)
+            .map(|i| MatrixPos::new(i as u8))
     }
 }
 
@@ -344,13 +449,13 @@ impl FromStr for Layer {
 /// A key position + layer reference, e.g. "Fn+Caps" → (Caps, Fn layer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyRef {
-    pub index: u8,
+    pub index: MatrixPos,
     pub position: &'static str,
     pub layer: Layer,
 }
 
 impl KeyRef {
-    pub fn new(index: u8, layer: Layer) -> Self {
+    pub fn new(index: MatrixPos, layer: Layer) -> Self {
         Self {
             index,
             position: matrix::key_name(index),
@@ -415,10 +520,10 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 /// Resolve a key name or numeric index to a matrix position.
-pub fn resolve_key(key: &str) -> Result<u8, String> {
+pub fn resolve_key(key: &str) -> Result<MatrixPos, String> {
     // Try numeric index first
     if let Ok(idx) = key.parse::<u8>() {
-        return Ok(idx);
+        return Ok(MatrixPos::new(idx));
     }
     // Try matrix key name (Esc, F3, LShf, etc.)
     if let Some(idx) = matrix::key_index_from_name(key) {

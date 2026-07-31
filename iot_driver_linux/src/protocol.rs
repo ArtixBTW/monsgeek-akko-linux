@@ -546,8 +546,14 @@ pub mod depth_report {
 
 /// HID Usage Table for Keyboard/Keypad (USB HID Usage Tables, Section 10)
 pub mod hid {
-    /// Get the name of a HID keyboard usage code
-    pub fn key_name(code: u8) -> &'static str {
+    use monsgeek_transport::protocol::HidUsage;
+
+    /// Name of a HID keyboard usage code.
+    ///
+    /// Sibling of `matrix::key_name`, which takes a *position* — the two used to be
+    /// interchangeable `u8 -> &str` functions and are now distinguished by type.
+    pub fn key_name(code: HidUsage) -> &'static str {
+        let code = code.get();
         match code {
             0x00 => "None",
             0x04 => "A",
@@ -729,12 +735,16 @@ pub mod hid {
     ///
     /// Accepts both canonical names from `key_name()` (e.g. "Escape", "LCtrl")
     /// and common aliases (e.g. "Esc", "LShf", "Del", "Win").
-    pub fn key_code_from_name(name: &str) -> Option<u8> {
+    pub fn key_code_from_name(name: &str) -> Option<HidUsage> {
+        code_from_name(name).map(HidUsage::new)
+    }
+
+    fn code_from_name(name: &str) -> Option<u8> {
         let name_lower = name.to_ascii_lowercase();
 
         // Exact match against key_name() for every valid HID usage.
         for code in (0x00..=0x00).chain(0x04..=0x73).chain(0xE0..=0xE7u8) {
-            let kn = key_name(code);
+            let kn = key_name(HidUsage::new(code));
             if kn != "?" && kn.to_ascii_lowercase() == name_lower {
                 return Some(code);
             }
@@ -1540,5 +1550,66 @@ pub mod screen_color {
         let sum: u32 = buf[0..7].iter().map(|&b| b as u32).sum();
         buf[7] = (255 - (sum & 0xFF)) as u8;
         buf
+    }
+}
+
+/// The two key-name tables — `matrix::key_name` (where a key sits) and
+/// `hid::key_name` (what it emits) — have the same shape and opposite meanings.
+/// `MatrixPos`/`HidUsage` now stop a swap at compile time; these tests pin the
+/// behaviour that made a swap silently plausible before.
+#[cfg(test)]
+mod index_space_tests {
+    use super::hid;
+    use monsgeek_transport::protocol::{matrix, HidUsage, MatrixPos};
+
+    #[test]
+    fn every_named_position_round_trips_through_the_matrix_table() {
+        for pos in (0..matrix::KEY_COUNT).map(MatrixPos::new) {
+            let name = pos.name();
+            if name == "?" {
+                continue;
+            }
+            assert_eq!(
+                matrix::key_index_from_name(name),
+                Some(pos),
+                "{name} (position {}) did not round-trip",
+                pos.get()
+            );
+        }
+    }
+
+    #[test]
+    fn every_named_usage_round_trips_through_the_hid_table() {
+        for code in (0x04..=0xE7u8).map(HidUsage::new) {
+            let name = hid::key_name(code);
+            if name == "?" {
+                continue;
+            }
+            assert_eq!(
+                hid::key_code_from_name(name),
+                Some(code),
+                "{name} ({:#04x}) did not round-trip",
+                code.get()
+            );
+        }
+    }
+
+    /// A name shared by both tables resolves to two different numbers, so feeding
+    /// one table's output to the other yielded a wrong-but-plausible answer.
+    #[test]
+    fn a_shared_name_means_different_numbers_in_each_table() {
+        for name in ["A", "Esc", "Tab", "F1", "Del"] {
+            let pos = matrix::key_index_from_name(name).expect("a matrix position");
+            let usage = hid::key_code_from_name(name).expect("a HID usage");
+            assert_ne!(
+                pos.get(),
+                usage.get(),
+                "{name}: position and usage happen to share a number, \
+                 so this name cannot witness the two spaces differing"
+            );
+            // And the numbers do not name the same key in the other space.
+            assert_ne!(matrix::key_name(MatrixPos::new(usage.get())), name);
+            assert_ne!(hid::key_name(HidUsage::new(pos.get())), name);
+        }
     }
 }

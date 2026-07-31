@@ -6,6 +6,7 @@
 use crate::key_action::KeyAction;
 use crate::keymap::{KeyRow, Layer};
 use monsgeek_keyboard::{DksBinding, DksPhase, KeyMode, ModeByte};
+use monsgeek_transport::protocol::MatrixPos;
 
 /// What to include in the listing.
 #[derive(Debug, Clone, Default)]
@@ -13,7 +14,7 @@ pub struct ListOptions {
     /// Layers to show; empty means all of them.
     pub layers: Vec<Layer>,
     /// Matrix positions to show; empty means all of them.
-    pub keys: Vec<u8>,
+    pub keys: Vec<MatrixPos>,
     /// Include keys and slots that are at their factory default.
     pub show_unset: bool,
     /// Append the raw 4-byte config to each row.
@@ -151,7 +152,8 @@ pub fn render(rows: &[KeyRow], opts: &ListOptions) -> String {
     let mut out = String::new();
     for (row, slots) in &selected {
         let note = header_note(row, opts);
-        out.push_str(&format!("{} ({})", row.position, row.index));
+        // The number, not `MatrixPos`'s name — it is what `--keys #N` takes.
+        out.push_str(&format!("{} ({})", row.position, row.index.get()));
         if !note.is_empty() {
             out.push_str(&format!("   {note}"));
         }
@@ -190,6 +192,7 @@ pub fn render(rows: &[KeyRow], opts: &ListOptions) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use monsgeek_transport::protocol::{HidUsage, MatrixPos};
 
     fn opts() -> ListOptions {
         ListOptions {
@@ -199,7 +202,7 @@ mod tests {
     }
 
     /// A key with nothing set, for building fixtures.
-    fn row(index: u8, position: &str) -> KeyRow {
+    fn row(index: MatrixPos, position: &str) -> KeyRow {
         KeyRow {
             index,
             position: position.to_string(),
@@ -224,8 +227,8 @@ mod tests {
     }
 
     fn caps_remapped() -> KeyRow {
-        let mut r = row(3, "Caps");
-        r.outputs[0] = KeyAction::Key(0x29);
+        let mut r = row(MatrixPos::new(3), "Caps");
+        r.outputs[0] = KeyAction::Key(HidUsage::new(0x29));
         r.output_remapped[0] = true;
         r.raw[0] = [0, 0, 0x29, 0];
         r
@@ -233,7 +236,7 @@ mod tests {
 
     #[test]
     fn untouched_keys_are_hidden_by_default() {
-        let out = render(&[row(3, "Caps")], &opts());
+        let out = render(&[row(MatrixPos::new(3), "Caps")], &opts());
         assert!(out.starts_with("No customised keys found"), "{out}");
     }
 
@@ -286,11 +289,11 @@ mod tests {
 
     #[test]
     fn key_filter_selects_which_keys_appear() {
-        let mut w = row(14, "W");
-        w.outputs[0] = KeyAction::Key(0x1A);
+        let mut w = row(MatrixPos::new(14), "W");
+        w.outputs[0] = KeyAction::Key(HidUsage::new(0x1A));
         w.output_remapped[0] = true;
         let mut o = opts();
-        o.keys = vec![3];
+        o.keys = vec![MatrixPos::new(3)];
         let out = render(&[caps_remapped(), w], &o);
         assert!(out.contains("Caps (3)"), "{out}");
         assert!(!out.contains("W (14)"), "{out}");
@@ -299,12 +302,12 @@ mod tests {
     /// DKS reinterprets layers 1-3 as output slots, so they are never `L1+`.
     #[test]
     fn dks_slots_are_labelled_by_slot_not_layer() {
-        let mut r = row(14, "W");
+        let mut r = row(MatrixPos::new(14), "W");
         r.mode = KeyMode::DynamicKeystroke;
         r.dks_travel = 120;
-        r.outputs[0] = KeyAction::Key(0x1A);
+        r.outputs[0] = KeyAction::Key(HidUsage::new(0x1A));
         r.output_remapped[0] = true;
-        r.outputs[1] = KeyAction::Key(0x06);
+        r.outputs[1] = KeyAction::Key(HidUsage::new(0x06));
         r.output_remapped[1] = true;
         r.dks_modes[1] = 1;
         let out = render(&[r], &opts());
@@ -316,9 +319,9 @@ mod tests {
     /// A slot with an output but no phase set never fires.
     #[test]
     fn dks_slot_without_a_phase_is_flagged_inactive() {
-        let mut r = row(14, "W");
+        let mut r = row(MatrixPos::new(14), "W");
         r.mode = KeyMode::DynamicKeystroke;
-        r.outputs[2] = KeyAction::Key(0x06);
+        r.outputs[2] = KeyAction::Key(HidUsage::new(0x06));
         r.output_remapped[2] = true;
         r.dks_modes[2] = 0;
         let out = render(&[r], &opts());
@@ -329,8 +332,8 @@ mod tests {
     /// `[0,0x29,0,0]` and `[0,0,0x29,0]` both decode to `Key(0x29)`.
     #[test]
     fn raw_prints_device_bytes_not_a_re_encoding() {
-        let mut r = row(3, "Caps");
-        r.outputs[0] = KeyAction::Key(0x29);
+        let mut r = row(MatrixPos::new(3), "Caps");
+        r.outputs[0] = KeyAction::Key(HidUsage::new(0x29));
         r.output_remapped[0] = true;
         r.raw[0] = [0, 0x29, 0, 0];
         let mut o = opts();
@@ -346,8 +349,8 @@ mod tests {
         let mut caps = caps_remapped();
         caps.fn_action = Some(KeyAction::Consumer(0x00E9));
         caps.fn_raw = Some([3, 0, 0xE9, 0]);
-        let mut w = row(14, "W");
-        w.outputs[0] = KeyAction::Key(0x1A);
+        let mut w = row(MatrixPos::new(14), "W");
+        w.outputs[0] = KeyAction::Key(HidUsage::new(0x1A));
         w.output_remapped[0] = true;
         let out = render(&[caps, w], &opts());
         assert_eq!(

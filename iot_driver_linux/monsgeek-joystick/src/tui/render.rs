@@ -299,17 +299,20 @@ fn render_axis_details(frame: &mut Frame, app: &App, area: Rect) {
         } => {
             lines.push(Line::from(format!(
                 "Positive: {} (idx:{})",
-                positive_key.position, positive_key.index
+                positive_key.position,
+                positive_key.index.get()
             )));
             lines.push(Line::from(format!(
                 "Negative: {} (idx:{})",
-                negative_key.position, negative_key.index
+                negative_key.position,
+                negative_key.index.get()
             )));
         }
         AxisMappingMode::SingleKey { key, .. } => {
             lines.push(Line::from(format!(
                 "Key: {} (idx:{})",
-                key.position, key.index
+                key.position,
+                key.index.get()
             )));
         }
     }
