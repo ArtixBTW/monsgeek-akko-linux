@@ -85,7 +85,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use monsgeek_transport::protocol::{
-    cmd, magnetism as mag_cmd, CommandTable, LedPos, StripIdx, FN_WIRE_LAYER,
+    cmd, magnetism as mag_cmd, CommandTable, KeymatrixLayer, Layer, LedPos, StripIdx,
 };
 use monsgeek_transport::{ChecksumType, FlowControlTransport, Transport};
 // Typed commands
@@ -635,9 +635,9 @@ impl KeyboardInterface {
     // === Per-Key RGB ===
 
     /// Set all keys to a single color (for per-key RGB mode)
-    pub fn set_all_keys_color(&self, color: RgbColor, layer: u8) -> Result<(), KeyboardError> {
+    pub fn set_all_keys_color(&self, color: RgbColor, led_layer: u8) -> Result<(), KeyboardError> {
         let colors = vec![(color.r, color.g, color.b); self.matrix_size()];
-        self.set_per_key_colors_to_layer(&colors, layer)
+        self.set_per_key_colors_to_layer(&colors, led_layer)
     }
 
     // === Userpic (Flash-Based Per-Key Colors, Mode 13) ===
@@ -1069,7 +1069,7 @@ impl KeyboardInterface {
     pub fn get_key_config_at_layer(
         &self,
         profile: u8,
-        layer: u8,
+        layer: KeymatrixLayer,
         key_index: u8,
     ) -> Result<[u8; 4], KeyboardError> {
         let matrix = self.get_keymatrix(profile, layer, 8)?;
@@ -1097,9 +1097,8 @@ impl KeyboardInterface {
         // Raw bytes: a DKS slot may hold any action, and decoding to a key-only
         // type here would silently drop macros/consumer usages on the next write.
         let mut configs = [[0u8; 4]; 4];
-        for (layer, config) in configs.iter_mut().enumerate() {
-            *config =
-                self.get_key_config_at_layer(self.active_profile(), layer as u8, key_index)?;
+        for (slot, config) in KeymatrixLayer::ALL.iter().zip(configs.iter_mut()) {
+            *config = self.get_key_config_at_layer(self.active_profile(), *slot, key_index)?;
         }
         Ok(DksConfig::from_parts(travel_raw, modes, configs))
     }
@@ -1139,16 +1138,11 @@ impl KeyboardInterface {
         &self,
         profile: u8,
         key_index: u8,
-        layer: u8,
+        layer: KeymatrixLayer,
         config: [u8; 4],
         commit: bool,
     ) -> Result<(), KeyboardError> {
-        if layer > 3 {
-            return Err(KeyboardError::InvalidParameter(
-                "keymatrix layer must be 0–3".into(),
-            ));
-        }
-        let pkt = SetKeyMatrixData::new(profile, key_index, layer, commit, config)?;
+        let pkt = SetKeyMatrixData::new(profile, key_index, layer.get(), commit, config)?;
         if commit {
             self.transport.send_command_with_delay(
                 self.commands.set_keymatrix,
@@ -1196,19 +1190,14 @@ impl KeyboardInterface {
         let mut configs: [[u8; 4]; 4] = std::array::from_fn(|i| config.bindings[i].config);
         configs[0] = resolve_slot0(
             configs[0],
-            self.get_key_config_at_layer(self.active_profile(), 0, key_index)?,
+            self.get_key_config_at_layer(self.active_profile(), KeymatrixLayer::BASE, key_index)?,
         );
 
-        for (binding, slot) in configs.into_iter().enumerate() {
+        for (binding, config) in configs.into_iter().enumerate() {
+            let slot = KeymatrixLayer::dks_slot(binding as u8).expect("4 bindings");
             // Persist once, on the final binding (commit = flash-dirty + settle).
             let commit = binding == 3;
-            self.set_keymatrix_config(
-                self.active_profile(),
-                key_index,
-                binding as u8,
-                slot,
-                commit,
-            )?;
+            self.set_keymatrix_config(self.active_profile(), key_index, slot, config, commit)?;
         }
         Ok(())
     }
@@ -1331,11 +1320,11 @@ impl KeyboardInterface {
         g: u8,
         b: u8,
         dazzle: bool,
-        layer: u8,
+        userpic_slot: u8,
     ) -> Result<(), KeyboardError> {
         let (option, r_val, g_val, b_val) = if mode == 13 {
-            // For UserPicture mode: option = layer << 4, RGB = (0, 200, 200)
-            (layer << 4, 0u8, 200u8, 200u8)
+            // For UserPicture mode: option = slot << 4, RGB = (0, 200, 200)
+            (userpic_slot << 4, 0u8, 200u8, 200u8)
         } else {
             let opt = if dazzle {
                 led::DAZZLE_ON
@@ -1403,12 +1392,12 @@ impl KeyboardInterface {
     /// # Arguments
     /// * `colors` - Tuple of (r, g, b) for each key (126 keys)
     /// * `repeat` - Number of times to send (for reliability)
-    /// * `layer` - Which layer to update (0-3)
+    /// * `led_layer` - Which LED bank to update (0-3). Not a key layer.
     pub fn set_per_key_colors_fast(
         &self,
         colors: &[(u8, u8, u8)],
         repeat: u8,
-        layer: u8,
+        led_layer: u8,
     ) -> Result<(), KeyboardError> {
         const CHUNK_SIZE: usize = 18; // 18 keys per chunk (54 bytes RGB)
 
@@ -1421,7 +1410,7 @@ impl KeyboardInterface {
         for _ in 0..repeat.max(1) {
             for (chunk_idx, chunk) in full_colors.chunks(CHUNK_SIZE).enumerate() {
                 let mut data = vec![0u8; 56]; // layer + page + 54 RGB bytes
-                data[0] = layer;
+                data[0] = led_layer;
                 data[1] = chunk_idx as u8;
                 for (i, &(r, g, b)) in chunk.iter().enumerate() {
                     data[2 + i * 3] = r;
@@ -1441,13 +1430,13 @@ impl KeyboardInterface {
         Ok(())
     }
 
-    /// Store per-key colors to a specific layer
+    /// Store per-key colors to a specific LED bank (not a key layer).
     pub fn set_per_key_colors_to_layer(
         &self,
         colors: &[(u8, u8, u8)],
-        layer: u8,
+        led_layer: u8,
     ) -> Result<(), KeyboardError> {
-        self.set_per_key_colors_fast(colors, 1, layer)
+        self.set_per_key_colors_fast(colors, 1, led_layer)
     }
 
     // === Calibration ===
@@ -1573,7 +1562,7 @@ impl KeyboardInterface {
     pub fn get_keymatrix(
         &self,
         profile: u8,
-        layer: u8,
+        layer: KeymatrixLayer,
         num_pages: usize,
     ) -> Result<Vec<u8>, KeyboardError> {
         let mut all_data = Vec::new();
@@ -1583,7 +1572,7 @@ impl KeyboardInterface {
                 profile,
                 magic: 0xFF,
                 page: page as u8,
-                layer,
+                layer: layer.get(),
             };
 
             match self.transport.query_raw(
@@ -1677,9 +1666,15 @@ impl KeyboardInterface {
         key_index: u8,
         hid_code: u8,
         enabled: bool,
-        layer: u8,
+        layer: KeymatrixLayer,
     ) -> Result<(), KeyboardError> {
-        let pkt = SetKeyMatrixData::new(profile, key_index, layer, enabled, [0, 0, hid_code, 0])?;
+        let pkt = SetKeyMatrixData::new(
+            profile,
+            key_index,
+            layer.get(),
+            enabled,
+            [0, 0, hid_code, 0],
+        )?;
         self.transport.send_command(
             self.commands.set_keymatrix,
             &pkt.to_data(),
@@ -1694,13 +1689,19 @@ impl KeyboardInterface {
     /// Not valid for keymatrix layer 0: the base layer has no ROM fallback, so an
     /// all-zero entry there silences the key. Reset it by writing the position's
     /// factory keycode instead.
-    pub fn reset_key(&self, layer: u8, key_index: u8) -> Result<(), KeyboardError> {
+    pub fn reset_key(&self, layer: Layer, key_index: u8) -> Result<(), KeyboardError> {
         match layer {
-            0 => Err(KeyboardError::InvalidParameter(
+            Layer::Base => Err(KeyboardError::InvalidParameter(
                 "base layer has no ROM fallback; write the factory keycode instead".into(),
             )),
-            FN_WIRE_LAYER => self.set_fn_config(self.active_profile(), key_index, [0, 0, 0, 0]),
-            l => self.set_keymatrix_config(self.active_profile(), key_index, l, [0, 0, 0, 0], true),
+            Layer::Fn => self.set_fn_config(self.active_profile(), key_index, [0, 0, 0, 0]),
+            Layer::Layer1 => self.set_keymatrix_config(
+                self.active_profile(),
+                key_index,
+                KeymatrixLayer::try_from(1).expect("1 is in range"),
+                [0, 0, 0, 0],
+                true,
+            ),
         }
     }
 
@@ -1714,9 +1715,9 @@ impl KeyboardInterface {
         code_b: u8,
     ) -> Result<(), KeyboardError> {
         // Set key_a to code_b
-        self.set_keymatrix(profile, key_a, code_b, true, 0)?;
+        self.set_keymatrix(profile, key_a, code_b, true, KeymatrixLayer::BASE)?;
         // Set key_b to code_a
-        self.set_keymatrix(profile, key_b, code_a, true, 0)
+        self.set_keymatrix(profile, key_b, code_a, true, KeymatrixLayer::BASE)
     }
 
     // === Macros ===
@@ -1881,25 +1882,29 @@ impl KeyboardInterface {
 
     /// Assign a macro to a key on any layer.
     ///
-    /// * `layer` - 0 for base, 1 for Fn
     /// * `macro_type` - 0=repeat by count, 1=toggle, 2=hold to repeat
     pub fn assign_macro_to_key(
         &self,
-        layer: u8,
+        layer: Layer,
         key_index: u8,
         macro_index: u8,
         macro_type: u8,
     ) -> Result<(), KeyboardError> {
         let config = [9, macro_type, macro_index, 0];
-        if layer == FN_WIRE_LAYER {
-            self.set_fn_config(self.active_profile(), key_index, config)
-        } else {
-            self.set_keymatrix_config(self.active_profile(), key_index, layer, config, true)
+        match layer.keymatrix_layer() {
+            Some(km) => {
+                self.set_keymatrix_config(self.active_profile(), key_index, km, config, true)
+            }
+            None => self.set_fn_config(self.active_profile(), key_index, config),
         }
     }
 
     /// Remove macro assignment from a key, restoring default behavior.
-    pub fn unassign_macro_from_key(&self, layer: u8, key_index: u8) -> Result<(), KeyboardError> {
+    pub fn unassign_macro_from_key(
+        &self,
+        layer: Layer,
+        key_index: u8,
+    ) -> Result<(), KeyboardError> {
         self.reset_key(layer, key_index)
     }
 

@@ -8,7 +8,7 @@
 
 use crate::key_action::KeyAction;
 use crate::protocol::hid;
-use monsgeek_transport::protocol::{matrix, HidUsage, MatrixPos};
+use monsgeek_transport::protocol::{matrix, HidUsage, KeymatrixLayer, MatrixPos};
 
 use monsgeek_keyboard::{
     DksConfig, KeyMode, KeyboardError, KeyboardInterface, ModeByte, SNAPTAP_UNBOUND,
@@ -59,15 +59,9 @@ pub fn set_key(
     action: &KeyAction,
 ) -> Result<(), KeyboardError> {
     let config = action.to_config_bytes();
-    match layer {
-        Layer::Fn => kb.set_fn_config(kb.active_profile(), index.get(), config),
-        _ => kb.set_keymatrix_config(
-            kb.active_profile(),
-            index.get(),
-            layer.wire_layer(),
-            config,
-            true,
-        ),
+    match layer.keymatrix_layer() {
+        Some(km) => kb.set_keymatrix_config(kb.active_profile(), index.get(), km, config, true),
+        None => kb.set_fn_config(kb.active_profile(), index.get(), config),
     }
 }
 
@@ -110,9 +104,9 @@ pub fn reset_key(
             index.get(),
             device_default_keycode(kb, index).get(),
             true,
-            0,
+            KeymatrixLayer::BASE,
         ),
-        Layer::Layer1 | Layer::Fn => kb.reset_key(layer.wire_layer(), index.get()),
+        Layer::Layer1 | Layer::Fn => kb.reset_key(layer, index.get()),
     }
 }
 
@@ -182,10 +176,10 @@ pub fn load_key_rows(kb: &KeyboardInterface, sys: u8) -> Result<Vec<KeyRow>, Key
     // Keymatrix layers 0–3 (outputs / DKS combos) + the separate Fn table.
     let profile = kb.active_profile();
     let layers: [Vec<u8>; 4] = [
-        kb.get_keymatrix(profile, 0, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix(profile, 1, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix(profile, 2, KEYMATRIX_PAGES)?,
-        kb.get_keymatrix(profile, 3, KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, KeymatrixLayer::ALL[0], KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, KeymatrixLayer::ALL[1], KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, KeymatrixLayer::ALL[2], KEYMATRIX_PAGES)?,
+        kb.get_keymatrix(profile, KeymatrixLayer::ALL[3], KEYMATRIX_PAGES)?,
     ];
     let fn_layer = kb.get_fn_keymatrix(profile, sys, KEYMATRIX_PAGES).ok();
 
@@ -339,13 +333,6 @@ mod tests {
         assert_eq!(Layer::Base.to_string(), "L0");
         assert_eq!(Layer::Layer1.to_string(), "L1");
         assert_eq!(Layer::Fn.to_string(), "Fn");
-    }
-
-    #[test]
-    fn layer_wire_roundtrip() {
-        for layer in Layer::ALL {
-            assert_eq!(Layer::from_wire(layer.wire_layer()), layer);
-        }
     }
 
     // -- KeyRef --

@@ -747,13 +747,6 @@ fn layer_parse_all_forms() {
 }
 
 #[test]
-fn layer_wire_roundtrip() {
-    for layer in Layer::ALL {
-        assert_eq!(Layer::from_wire(layer.wire_layer()), layer);
-    }
-}
-
-#[test]
 fn layer_display_short() {
     assert_eq!(Layer::Base.to_string(), "L0");
     assert_eq!(Layer::Layer1.to_string(), "L1");

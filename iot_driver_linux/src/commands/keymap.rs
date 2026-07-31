@@ -6,12 +6,13 @@ use iot_driver::keymap::{self, KeyRef, Layer};
 use iot_driver::keymatrix_view::{self, ListOptions};
 use iot_driver::protocol::hid;
 use monsgeek_keyboard::KeyboardInterface;
+use monsgeek_transport::protocol::KeymatrixLayer;
 
 /// Remap a key.
 ///
 /// `from` can include a layer prefix: `"Fn+Caps"`, `"L1+A"`, `"42"`.
 /// When a layer prefix is present, it takes precedence over the `--layer` flag.
-pub fn remap(keyboard: &KeyboardInterface, from: &str, to: &str, layer: u8) -> CommandResult {
+pub fn remap(keyboard: &KeyboardInterface, from: &str, to: &str, layer: Layer) -> CommandResult {
     let key_ref: KeyRef = match from.parse() {
         Ok(kr) => kr,
         Err(msg) => {
@@ -25,7 +26,7 @@ pub fn remap(keyboard: &KeyboardInterface, from: &str, to: &str, layer: u8) -> C
     let effective_layer = if from.contains('+') {
         key_ref.layer
     } else {
-        Layer::from_wire(layer)
+        layer
     };
 
     let action: KeyAction = match to.parse() {
@@ -53,7 +54,7 @@ pub fn remap(keyboard: &KeyboardInterface, from: &str, to: &str, layer: u8) -> C
 /// Reset a key to default.
 ///
 /// `key` can include a layer prefix: `"Fn+Caps"`, `"L1+A"`.
-pub fn reset_key(keyboard: &KeyboardInterface, key: &str, layer: u8) -> CommandResult {
+pub fn reset_key(keyboard: &KeyboardInterface, key: &str, layer: Layer) -> CommandResult {
     let key_ref: KeyRef = match key.parse() {
         Ok(kr) => kr,
         Err(msg) => {
@@ -65,7 +66,7 @@ pub fn reset_key(keyboard: &KeyboardInterface, key: &str, layer: u8) -> CommandR
     let effective_layer = if key.contains('+') {
         key_ref.layer
     } else {
-        Layer::from_wire(layer)
+        layer
     };
 
     let display_ref = KeyRef::new(key_ref.index, effective_layer);
@@ -102,7 +103,7 @@ pub fn swap(keyboard: &KeyboardInterface, key1: &str, key2: &str, profile: u8) -
         }
     };
 
-    match keyboard.get_keymatrix(profile, 0, 8) {
+    match keyboard.get_keymatrix(profile, KeymatrixLayer::BASE, 8) {
         Ok(data) => {
             let (key_a, key_b) = (kr_a.index, kr_b.index);
             // The keymatrix entry's usage sits at byte 2 of the 4-byte slot.

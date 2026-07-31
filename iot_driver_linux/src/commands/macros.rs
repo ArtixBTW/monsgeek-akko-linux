@@ -4,7 +4,7 @@ use super::CommandResult;
 use iot_driver::macro_seq::MacroSeq;
 use iot_driver::protocol::hid;
 use monsgeek_keyboard::{parse_macro_events, KeyboardInterface};
-use monsgeek_transport::protocol::{matrix, HidUsage, MatrixPos};
+use monsgeek_transport::protocol::{matrix, HidUsage, Layer, MatrixPos};
 
 /// Get macro for a key
 pub fn get_macro(keyboard: &KeyboardInterface, key: &str) -> CommandResult {
@@ -145,7 +145,7 @@ pub fn assign_macro(
     };
 
     let key_name = keyboard.matrix_key_name(key_index.into());
-    let layer_num: u8 = if fn_layer { 1 } else { 0 };
+    let layer = if fn_layer { Layer::Fn } else { Layer::Base };
     let prefix = if fn_layer { "Fn+" } else { "" };
     println!(
         "Assigning macro {macro_index} to {prefix}{key_name} (index {})...",
@@ -153,7 +153,7 @@ pub fn assign_macro(
     );
 
     // macro_type 0 = repeat by count
-    let result = keyboard.assign_macro_to_key(layer_num, key_index.get(), macro_index, 0);
+    let result = keyboard.assign_macro_to_key(layer, key_index.get(), macro_index, 0);
     match result {
         Ok(()) => println!("Macro {macro_index} assigned to {prefix}{key_name}"),
         Err(e) => eprintln!("Failed to assign macro: {e}"),

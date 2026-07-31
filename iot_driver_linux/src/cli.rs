@@ -1,6 +1,7 @@
 // CLI definitions using clap
 
 use clap::{Parser, Subcommand, ValueEnum};
+use monsgeek_transport::protocol::Layer;
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -329,9 +330,9 @@ pub enum Commands {
         g: u8,
         /// Blue (0-255)
         b: u8,
-        /// Layer (0-3)
+        /// LED layer (0-3) — an LED bank, unrelated to key layers
         #[arg(short, long, default_value = "0")]
-        layer: u8,
+        led_layer: u8,
     },
 
     // === Key Remapping ===
@@ -344,7 +345,7 @@ pub enum Commands {
         to: String,
         /// Layer (0=base, 1=layer1, 2=fn) — overridden by prefix in FROM
         #[arg(short, long, default_value = "0")]
-        layer: u8,
+        layer: Layer,
     },
 
     /// Reset a key to default (supports layer prefix: Fn+Caps, L1+A)
@@ -354,7 +355,7 @@ pub enum Commands {
         key: String,
         /// Layer (0=base, 1=layer1, 2=fn) — overridden by prefix in KEY
         #[arg(short, long, default_value = "0")]
-        layer: u8,
+        layer: Layer,
     },
 
     /// Swap two keys
@@ -480,7 +481,7 @@ pub enum Commands {
         mode: String,
         /// Userpic slot for mode 13 (UserPicture)
         #[arg(short, long, default_value = "0")]
-        layer: u8,
+        userpic_slot: u8,
     },
 
     /// List all available LED modes

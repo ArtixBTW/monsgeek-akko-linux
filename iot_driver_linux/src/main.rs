@@ -131,8 +131,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(Commands::Reset) => {
             commands::with_keyboard(&ctx, commands::set::reset)?;
         }
-        Some(Commands::SetColorAll { r, g, b, layer }) => {
-            commands::with_keyboard(&ctx, |kb| commands::set::set_color_all(kb, r, g, b, layer))?;
+        Some(Commands::SetColorAll { r, g, b, led_layer }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::set::set_color_all(kb, r, g, b, led_layer)
+            })?;
         }
 
         // === Trigger Commands ===
@@ -282,8 +284,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }) => {
             commands::led_stream::stream_gif(&ctx, &file, fps, r#loop, power_budget)?;
         }
-        Some(Commands::Mode { mode, layer }) => {
-            commands::with_keyboard(&ctx, |kb| commands::animations::mode(kb, &mode, layer))?;
+        Some(Commands::Mode { mode, userpic_slot }) => {
+            commands::with_keyboard(&ctx, |kb| {
+                commands::animations::mode(kb, &mode, userpic_slot)
+            })?;
         }
         Some(Commands::Modes) => {
             commands::animations::modes()?;

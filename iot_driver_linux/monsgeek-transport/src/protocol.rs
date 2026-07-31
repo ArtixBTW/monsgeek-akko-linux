@@ -482,10 +482,65 @@ pub mod matrix {
 // Layer
 // ---------------------------------------------------------------------------
 
-/// Wire `layer` value that selects the Fn store (SET_FN / GET_FN) instead of a
-/// keymatrix layer. Keymatrix layers are 0–3; in DKS mode all four are the key's
-/// output slots, so this value is deliberately outside that range.
-pub const FN_WIRE_LAYER: u8 = 2;
+/// A keymatrix sub-layer, 0–3 — the wire-level address of one of a key's four
+/// config slots.
+///
+/// What a slot *means* depends on the key's mode. In Normal mode slot 0 is the
+/// key's output and slot 1 an overlay; in DKS mode the firmware reinterprets all
+/// four as the key's DKS bindings. Use [`Self::dks_slot`] when that is the intent,
+/// so the call site says which reading it wants.
+///
+/// The Fn layer is deliberately *not* representable here: it lives in a separate
+/// store (SET_FN / GET_FN), not in the keymatrix. [`Layer`] is the type that
+/// spans both.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct KeymatrixLayer(u8);
+
+impl KeymatrixLayer {
+    pub const COUNT: u8 = 4;
+    pub const BASE: Self = Self(0);
+    /// Every sub-layer, in wire order.
+    pub const ALL: [Self; 4] = [Self(0), Self(1), Self(2), Self(3)];
+
+    /// The `n`th DKS binding of a key. Same wire value as the sub-layer of the
+    /// same number — the firmware reinterprets, it does not relocate.
+    pub const fn dks_slot(n: u8) -> Option<Self> {
+        if n < Self::COUNT {
+            Some(Self(n))
+        } else {
+            None
+        }
+    }
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl TryFrom<u8> for KeymatrixLayer {
+    type Error = String;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        if v < Self::COUNT {
+            Ok(Self(v))
+        } else {
+            Err(format!("keymatrix layer must be 0–3, got {v}"))
+        }
+    }
+}
+
+impl From<KeymatrixLayer> for u8 {
+    fn from(l: KeymatrixLayer) -> Self {
+        l.0
+    }
+}
+
+impl fmt::Display for KeymatrixLayer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 /// Logical key layer on the keyboard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -520,22 +575,30 @@ impl Layer {
         }
     }
 
-    /// Wire value used by the key-config writers. `Fn` is [`FN_WIRE_LAYER`],
-    /// which selects the separate SET_FN store rather than a keymatrix layer.
-    pub fn wire_layer(self) -> u8 {
+    /// Which keymatrix sub-layer backs this layer, if any.
+    ///
+    /// `Fn` returns `None`: it is a separate store (SET_FN / GET_FN), so a caller
+    /// has to branch rather than write it as though it were a keymatrix slot.
+    pub fn keymatrix_layer(self) -> Option<KeymatrixLayer> {
         match self {
-            Layer::Base => 0,
-            Layer::Layer1 => 1,
-            Layer::Fn => FN_WIRE_LAYER,
+            Layer::Base => Some(KeymatrixLayer(0)),
+            Layer::Layer1 => Some(KeymatrixLayer(1)),
+            Layer::Fn => None,
         }
     }
+}
 
-    /// Convert from wire layer number.
-    pub fn from_wire(layer: u8) -> Self {
-        match layer {
-            0 => Layer::Base,
-            1 => Layer::Layer1,
-            _ => Layer::Fn,
+impl TryFrom<u8> for Layer {
+    type Error = String;
+
+    /// The numbering `--layer` accepts, matching [`FromStr`]. Not a wire value —
+    /// `Fn` has no keymatrix slot; see [`Layer::keymatrix_layer`].
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Layer::Base),
+            1 => Ok(Layer::Layer1),
+            2 => Ok(Layer::Fn),
+            _ => Err(format!("unknown layer: {v}. Use 0 (base), 1, or 2 (Fn)")),
         }
     }
 }
@@ -1020,5 +1083,71 @@ mod led_index_space_tests {
         }
         assert_eq!(LedPos::from_row_col(led_grid::ROWS, 0), None);
         assert_eq!(LedPos::from_row_col(0, led_grid::COLS), None);
+    }
+}
+
+/// `Layer` spans two stores and `KeymatrixLayer` only one, so the two are not
+/// interchangeable. Before this split a `FN_WIRE_LAYER = 2` sentinel stood in for
+/// "the Fn store" in a `u8` that also held keymatrix slot 2, and callers
+/// disagreed about which numbering they were speaking.
+#[cfg(test)]
+mod layer_tests {
+    use super::{KeymatrixLayer, Layer};
+
+    #[test]
+    fn only_the_base_layers_have_a_keymatrix_slot() {
+        assert_eq!(
+            Layer::Base.keymatrix_layer().map(KeymatrixLayer::get),
+            Some(0)
+        );
+        assert_eq!(
+            Layer::Layer1.keymatrix_layer().map(KeymatrixLayer::get),
+            Some(1)
+        );
+        // Fn lives in SET_FN / GET_FN, so it has no keymatrix slot at all.
+        assert_eq!(Layer::Fn.keymatrix_layer(), None);
+    }
+
+    /// Out of range must be rejected, not wrapped or saturated onto a real layer —
+    /// the old `from_wire` mapped *everything* >= 2 onto `Fn`.
+    #[test]
+    fn out_of_range_layers_are_rejected() {
+        for v in 0..=3u8 {
+            assert_eq!(KeymatrixLayer::try_from(v).map(|l| l.get()), Ok(v));
+            assert_eq!(
+                KeymatrixLayer::dks_slot(v).map(KeymatrixLayer::get),
+                Some(v)
+            );
+        }
+        for v in 4..=u8::MAX {
+            assert!(
+                KeymatrixLayer::try_from(v).is_err(),
+                "{v} must not be a layer"
+            );
+            assert_eq!(
+                KeymatrixLayer::dks_slot(v),
+                None,
+                "{v} must not be a DKS slot"
+            );
+        }
+
+        for (v, expect) in [(0, Layer::Base), (1, Layer::Layer1), (2, Layer::Fn)] {
+            assert_eq!(Layer::try_from(v), Ok(expect));
+        }
+        for v in 3..=u8::MAX {
+            assert!(Layer::try_from(v).is_err(), "{v} must not be a layer");
+        }
+    }
+
+    /// Parsing and display agree with the numbering `TryFrom` accepts.
+    #[test]
+    fn layer_names_and_numbers_agree() {
+        for (v, layer) in [(0, Layer::Base), (1, Layer::Layer1), (2, Layer::Fn)] {
+            assert_eq!(v.to_string().parse::<Layer>(), Ok(layer));
+            assert_eq!(
+                layer.short().to_ascii_lowercase().parse::<Layer>(),
+                Ok(layer)
+            );
+        }
     }
 }

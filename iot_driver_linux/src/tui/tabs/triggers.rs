@@ -12,7 +12,7 @@ use crate::TriggerSettings;
 use monsgeek_keyboard::{
     DksAction, DksBinding, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, ModeByte, Precision,
 };
-use monsgeek_transport::protocol::{HidUsage, FN_WIRE_LAYER};
+use monsgeek_transport::protocol::{HidUsage, KeymatrixLayer, Layer};
 
 use super::super::keys::{all_hid_keys, CONSUMER_KEYS};
 use super::super::shared::{AsyncResult, LoadState, SpinnerConfig};
@@ -324,7 +324,7 @@ pub(in crate::tui) struct TriggerEditModal {
     pub slots_orig: [KeyAction; 4],
     pub fn_action_orig: KeyAction,
     /// Which output the `Output`/`Layer` fields target: 0=Base, 1=Layer1, 2=Fn.
-    pub output_layer: usize,
+    pub output_layer: Layer,
     /// Open output picker: any HID key or consumer/media control. Shared by the
     /// per-layer output field and the DKS slot field — both edit a keymatrix entry.
     pub output_picker: Option<PopupSelect<KeyAction>>,
@@ -364,7 +364,7 @@ impl TriggerEditModal {
             fn_action: KeyAction::Disabled,
             slots_orig: [KeyAction::Disabled; 4],
             fn_action_orig: KeyAction::Disabled,
-            output_layer: 0,
+            output_layer: Layer::Base,
             output_picker: None,
             chord_buf: Vec::new(),
             picker_title: String::new(),
@@ -411,7 +411,7 @@ impl TriggerEditModal {
             fn_action: prefetch.fn_action,
             slots_orig: prefetch.slots,
             fn_action_orig: prefetch.fn_action,
-            output_layer: 0,
+            output_layer: Layer::Base,
             output_picker: None,
             chord_buf: Vec::new(),
             picker_title: String::new(),
@@ -641,30 +641,37 @@ impl TriggerEditModal {
     /// The action the `Output` field currently targets: keymatrix layer 0/1, or the
     /// separate Fn entry.
     pub(in crate::tui) fn output_action(&self) -> KeyAction {
-        match self.output_layer {
-            l if l as u8 == FN_WIRE_LAYER => self.fn_action,
-            l => self.slots[l],
+        match self.output_layer.keymatrix_layer() {
+            Some(km) => self.slots[usize::from(km.get())],
+            None => self.fn_action,
         }
     }
 
     pub(in crate::tui) fn set_output_action(&mut self, action: KeyAction) {
-        match self.output_layer {
-            l if l as u8 == FN_WIRE_LAYER => self.fn_action = action,
-            l => self.slots[l] = action,
+        match self.output_layer.keymatrix_layer() {
+            Some(km) => self.slots[usize::from(km.get())] = action,
+            None => self.fn_action = action,
         }
     }
 
-    /// Names of the three output layers, indexed by `output_layer`.
     pub(in crate::tui) fn output_layer_name(&self) -> &'static str {
-        ["Base", "Layer1", "Fn"][self.output_layer.min(2)]
+        match self.output_layer {
+            Layer::Base => "Base",
+            Layer::Layer1 => "Layer1",
+            Layer::Fn => "Fn",
+        }
     }
 
     /// Cycle the output-layer selector (Base → Layer1 → Fn → Base).
     pub(in crate::tui) fn cycle_output_layer(&mut self, forward: bool) {
+        let i = Layer::ALL
+            .iter()
+            .position(|&l| l == self.output_layer)
+            .unwrap_or(0);
         self.output_layer = if forward {
-            (self.output_layer + 1) % 3
+            Layer::ALL[(i + 1) % Layer::ALL.len()]
         } else {
-            (self.output_layer + 2) % 3
+            Layer::ALL[(i + Layer::ALL.len() - 1) % Layer::ALL.len()]
         };
     }
 
@@ -678,7 +685,7 @@ impl TriggerEditModal {
         let (title, current) = (self.output_layer_name().to_string(), self.output_action());
         // Base (keymatrix layer 0) has no ROM fallback, so "(none)" would silence the
         // key; the overlay layers treat an empty entry as transparent.
-        self.open_action_picker(title, current, self.output_layer != 0);
+        self.open_action_picker(title, current, self.output_layer != Layer::Base);
     }
 
     /// Open the same picker for the selected DKS output slot.
@@ -908,8 +915,12 @@ impl App {
             }
             None => std::array::from_fn(|i| {
                 kb.and_then(|kb| {
-                    kb.get_key_config_at_layer(kb.active_profile(), i as u8, key_index as u8)
-                        .ok()
+                    kb.get_key_config_at_layer(
+                        kb.active_profile(),
+                        KeymatrixLayer::ALL[i],
+                        key_index as u8,
+                    )
+                    .ok()
                 })
                 .map(KeyAction::from_config_bytes)
                 .unwrap_or(KeyAction::Disabled)
@@ -1088,35 +1099,34 @@ impl App {
                             // just what changed; layer 0 must never go all-zero, since
                             // the base layer has no ROM fallback and would be silenced.
                             let changed = [
-                                (0usize, modal.slots[0], modal.slots_orig[0]),
-                                (1, modal.slots[1], modal.slots_orig[1]),
-                                (
-                                    FN_WIRE_LAYER as usize,
-                                    modal.fn_action,
-                                    modal.fn_action_orig,
-                                ),
+                                (Layer::Base, modal.slots[0], modal.slots_orig[0]),
+                                (Layer::Layer1, modal.slots[1], modal.slots_orig[1]),
+                                (Layer::Fn, modal.fn_action, modal.fn_action_orig),
                             ];
                             for (layer, now, before) in changed {
                                 if now == before {
                                     continue;
                                 }
                                 let bytes = now.to_config_bytes();
-                                if layer == 0 && bytes == [0, 0, 0, 0] {
+                                if layer == Layer::Base && bytes == [0, 0, 0, 0] {
                                     continue;
                                 }
-                                let res = if layer as u8 == FN_WIRE_LAYER {
-                                    keyboard.set_fn_config(keyboard.active_profile(), key, bytes)
-                                } else {
-                                    keyboard.set_keymatrix_config(
+                                let res = match layer.keymatrix_layer() {
+                                    Some(km) => keyboard.set_keymatrix_config(
                                         keyboard.active_profile(),
                                         key,
-                                        layer as u8,
+                                        km,
                                         bytes,
                                         true,
-                                    )
+                                    ),
+                                    None => keyboard.set_fn_config(
+                                        keyboard.active_profile(),
+                                        key,
+                                        bytes,
+                                    ),
                                 };
                                 if let Err(e) = res {
-                                    extra.push(format!("output L{layer}: {e}"));
+                                    extra.push(format!("output {layer}: {e}"));
                                 }
                             }
                         }
