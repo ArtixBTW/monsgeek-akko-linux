@@ -223,10 +223,17 @@ pub fn open_keyboard(
 
     // Keymatrix and Fn operations target the board's active profile unless the
     // caller overrides it, so a read and the write that follows always agree.
-    let profile = ctx
-        .profile
-        .or_else(|| kb.get_profile().ok())
-        .unwrap_or_default();
+    //
+    // If the query fails there is no safe default: assuming profile 0 would send
+    // every subsequent write to profile 0's storage while the board is running
+    // some other profile — the user's edit lands somewhere they are not looking,
+    // and the profile they *were* editing is left untouched. Say so instead.
+    let profile = match ctx.profile {
+        Some(p) => p,
+        None => kb.get_profile().map_err(|e| {
+            format!("could not determine the active profile ({e}); pass --profile to choose one")
+        })?,
+    };
     kb.set_active_profile(profile);
 
     // Set non-analog positions from matrix database (encoder/GPIO keys).
