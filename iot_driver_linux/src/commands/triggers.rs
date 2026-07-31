@@ -422,7 +422,6 @@ fn restore_input(_monitor: &InputMonitor) {}
 pub fn triggers(keyboard: &KeyboardInterface) -> CommandResult {
     let version = keyboard.get_version().unwrap_or_default();
     let precision = keyboard.get_precision().unwrap_or_default();
-    let factor = precision.factor() as f32;
     println!(
         "Trigger Settings (firmware {}, precision: {})",
         version.format(),
@@ -440,25 +439,24 @@ pub fn triggers(keyboard: &KeyboardInterface) -> CommandResult {
 
             let num_keys = triggers.key_modes.len().min(triggers.press_travel.len());
 
+            // Fixed point at the device's own resolution: a 1-decimal render
+            // showed raw 204 as "2.0mm", hiding the 0.04mm it actually holds.
+            let mm = |raw: u16| TravelDepth::from_raw(raw).format(precision);
             println!("First key settings (as sample):");
             println!(
-                "  Actuation:     {:.1}mm (raw: {})",
-                first_press as f32 / factor,
+                "  Actuation:     {} (raw: {})",
+                mm(first_press),
                 first_press
             );
+            println!("  Release:       {} (raw: {})", mm(first_lift), first_lift);
             println!(
-                "  Release:       {:.1}mm (raw: {})",
-                first_lift as f32 / factor,
-                first_lift
-            );
-            println!(
-                "  RT Press:      {:.2}mm (raw: {})",
-                first_rt_press as f32 / factor,
+                "  RT Press:      {} (raw: {})",
+                mm(first_rt_press),
                 first_rt_press
             );
             println!(
-                "  RT Release:    {:.2}mm (raw: {})",
-                first_rt_lift as f32 / factor,
+                "  RT Release:    {} (raw: {})",
+                mm(first_rt_lift),
                 first_rt_lift
             );
             println!(
@@ -487,12 +485,7 @@ pub fn triggers(keyboard: &KeyboardInterface) -> CommandResult {
                 for i in 0..10.min(num_keys) {
                     let press = triggers.press_travel.get(i).copied().unwrap_or(0);
                     let mode = triggers.key_modes.get(i).copied().unwrap_or(0);
-                    println!(
-                        "  Key {:2}: {:.1}mm mode={}",
-                        i,
-                        press as f32 / factor,
-                        mode
-                    );
+                    println!("  Key {:2}: {} mode={}", i, mm(press), mode);
                 }
             }
         }
@@ -504,7 +497,7 @@ pub fn triggers(keyboard: &KeyboardInterface) -> CommandResult {
 /// Set actuation point for all keys
 pub fn set_actuation(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 1.05mm stored as 104.
     let travel = TravelDepth::from_mm(mm, precision);
     match keyboard.set_actuation_all(travel) {
         Ok(_) => println!(
@@ -547,7 +540,7 @@ pub fn set_rt(keyboard: &KeyboardInterface, value: &str) -> CommandResult {
 /// Set release point for all keys
 pub fn set_release(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 1.05mm stored as 104.
     let travel = TravelDepth::from_mm(mm, precision);
     match keyboard.set_release_all(travel) {
         Ok(_) => println!(
@@ -562,7 +555,7 @@ pub fn set_release(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
 /// Set bottom deadzone for all keys
 pub fn set_bottom_deadzone(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 1.05mm stored as 104.
     let travel = TravelDepth::from_mm(mm, precision);
     match keyboard.set_bottom_deadzone_all(travel) {
         Ok(_) => println!(
@@ -577,7 +570,7 @@ pub fn set_bottom_deadzone(keyboard: &KeyboardInterface, mm: f32) -> CommandResu
 /// Set top deadzone for all keys
 pub fn set_top_deadzone(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 1.05mm stored as 104.
     let travel = TravelDepth::from_mm(mm, precision);
     match keyboard.set_top_deadzone_all(travel) {
         Ok(_) => println!(
@@ -609,7 +602,6 @@ pub fn set_key_trigger(
 
     let precision = keyboard.get_precision().unwrap_or_default();
     // Per-key config uses the same u16 precision as the bulk table (0.01mm here).
-    let factor = precision.factor() as f32;
 
     // Base mode and RT flag are independent; each preserves the current value
     // when not overridden.
@@ -629,9 +621,9 @@ pub fn set_key_trigger(
         Ok(_) => {
             println!("Key {key} trigger settings updated:");
             println!(
-                "  Actuation: {:.2}mm, Release: {:.2}mm, Mode: {}  (precision: {})",
-                settings.actuation as f32 / factor,
-                settings.deactuation as f32 / factor,
+                "  Actuation: {}, Release: {}, Mode: {}  (precision: {})",
+                TravelDepth::from_raw(settings.actuation).format(precision),
+                TravelDepth::from_raw(settings.deactuation).format(precision),
                 ModeByte::new(settings.mode, settings.rapid_trigger),
                 precision.as_str(),
             );
@@ -811,7 +803,6 @@ pub fn dks(
 
 fn show_dks(keyboard: &KeyboardInterface, key: u8) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    let factor = precision.factor() as f32;
 
     match keyboard.get_dks_config(key) {
         Ok(config) => {
@@ -821,8 +812,8 @@ fn show_dks(keyboard: &KeyboardInterface, key: u8) -> CommandResult {
                 println!("  Mode: {}", ModeByte::new(t.mode, t.rapid_trigger));
             }
             println!(
-                "  Trigger-point travel: {:.2}mm (raw {})",
-                config.trigger_point_travel_raw as f32 / factor,
+                "  Trigger-point travel: {} (raw {})",
+                TravelDepth::from_raw(config.trigger_point_travel_raw).format(precision),
                 config.trigger_point_travel_raw
             );
             println!("  Binding rows (packed): {:02X?}", config.trigger_modes());

@@ -9,6 +9,7 @@ use crate::firmware_api::FirmwareCheckResult;
 use crate::hid::BatteryInfo;
 use crate::keymap::KeyRow;
 use crate::TriggerSettings;
+use monsgeek_keyboard::TravelDepth;
 use monsgeek_keyboard::{KeyboardOptions as KbOptions, LedParams, Precision, SleepTimeSettings};
 use monsgeek_transport::TransportType;
 
@@ -191,7 +192,7 @@ impl SpinnerConfig {
     pub fn format(&self, value: u16) -> String {
         match self.display {
             SpinnerDisplay::Integer(_) => value.to_string(),
-            SpinnerDisplay::Travel(p) => format!("{:.2}", p.raw_to_mm(value)),
+            SpinnerDisplay::Travel(p) => TravelDepth::from_raw(value).format_mm(p),
         }
     }
 

@@ -165,7 +165,7 @@ pub fn keymatrix(
         keys: selected,
         show_unset: unset,
         raw,
-        travel_factor: keyboard.get_precision().unwrap_or_default().factor() as f32,
+        precision: keyboard.get_precision().unwrap_or_default(),
     };
     print!("{}", keymatrix_view::render(&rows, &opts));
     Ok(())

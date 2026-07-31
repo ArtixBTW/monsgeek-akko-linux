@@ -15,7 +15,11 @@ impl TravelDepth {
         Self(raw)
     }
 
-    /// Create from millimeters using the given precision
+    /// Parse a user-supplied millimetre value, rounding to the nearest raw unit.
+    ///
+    /// This is the *only* place a float becomes a travel value: everything
+    /// downstream — stepping, storing, sending, displaying — is integer, so this
+    /// is the single point where a rounding decision is made.
     pub fn from_mm(mm: f32, precision: Precision) -> Self {
         Self(precision.mm_to_raw(mm as f64))
     }
@@ -25,14 +29,31 @@ impl TravelDepth {
         self.0
     }
 
-    /// Convert to millimeters using the given precision
+    /// Convert to millimetres for *computation* (chart axes, comparisons).
+    /// For display use [`Self::format`], which is exact.
     pub fn to_mm(&self, precision: Precision) -> f32 {
         precision.raw_to_mm(self.0) as f32
     }
 
-    /// Format as string with mm suffix (e.g., "1.50mm")
+    /// Millimetres as fixed point, e.g. `"1.50"` — pure integer arithmetic, so
+    /// the displayed digits are the stored value and nothing is rounded away.
+    /// The number of decimals follows the device precision.
+    pub fn format_mm(&self, precision: Precision) -> String {
+        let decimals = precision.decimals();
+        // µm are exact; scale down to the device's own resolution, also exact.
+        let scaled = precision.raw_to_um(self.0) / 10u32.pow(3 - decimals);
+        let unit = 10u32.pow(decimals);
+        format!(
+            "{}.{:0width$}",
+            scaled / unit,
+            scaled % unit,
+            width = decimals as usize
+        )
+    }
+
+    /// Fixed-point millimetres with the unit suffix, e.g. `"1.50mm"`.
     pub fn format(&self, precision: Precision) -> String {
-        format!("{:.2}mm", self.to_mm(precision))
+        format!("{}mm", self.format_mm(precision))
     }
 }
 
@@ -635,5 +656,39 @@ mod travel_depth_tests {
                 );
             }
         }
+    }
+
+    /// Display is integer fixed point, so every raw value renders exactly and
+    /// parsing the rendered string returns the same raw value. A float `{:.2}`
+    /// render could not do this at 0.005mm precision, where a raw unit is half
+    /// of the last digit shown.
+    #[test]
+    fn display_is_exact_and_reparses_to_the_same_raw() {
+        for p in [Precision::Coarse, Precision::Medium, Precision::Fine] {
+            for raw in 0..=800u16 {
+                let d = TravelDepth::from_raw(raw);
+                let text = d.format_mm(p);
+                let reparsed: f32 = text.parse().expect("fixed point parses as a number");
+                assert_eq!(
+                    TravelDepth::from_mm(reparsed, p).raw(),
+                    raw,
+                    "{p:?}: raw {raw} rendered as {text}, which reads back differently"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn display_follows_the_device_resolution() {
+        let d = TravelDepth::from_raw(204);
+        assert_eq!(d.format(Precision::Coarse), "20.4mm"); // 0.1mm units
+        assert_eq!(d.format(Precision::Medium), "2.04mm"); // 0.01mm units
+        assert_eq!(d.format(Precision::Fine), "1.020mm"); // 0.005mm units
+                                                          // A trailing zero is kept, so the column width does not jump around.
+        assert_eq!(
+            TravelDepth::from_raw(200).format(Precision::Medium),
+            "2.00mm"
+        );
+        assert_eq!(TravelDepth::from_raw(0).format(Precision::Medium), "0.00mm");
     }
 }

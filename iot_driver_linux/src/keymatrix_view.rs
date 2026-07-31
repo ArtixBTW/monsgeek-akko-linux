@@ -5,7 +5,7 @@
 
 use crate::key_action::KeyAction;
 use crate::keymap::{KeyRow, Layer};
-use monsgeek_keyboard::{DksBinding, DksPhase, KeyMode, ModeByte};
+use monsgeek_keyboard::{DksBinding, DksPhase, KeyMode, ModeByte, Precision, TravelDepth};
 use monsgeek_transport::protocol::MatrixPos;
 
 /// What to include in the listing.
@@ -19,8 +19,8 @@ pub struct ListOptions {
     pub show_unset: bool,
     /// Append the raw 4-byte config to each row.
     pub raw: bool,
-    /// Device travel precision (raw units per mm) for the DKS trigger point.
-    pub travel_factor: f32,
+    /// Device travel precision, for rendering the DKS trigger point.
+    pub precision: Precision,
 }
 
 impl ListOptions {
@@ -112,10 +112,10 @@ fn header_note(row: &KeyRow, opts: &ListOptions) -> String {
     if row.mode != KeyMode::Normal || row.rapid_trigger {
         parts.push(ModeByte::new(row.mode, row.rapid_trigger).to_string());
     }
-    if row.mode == KeyMode::DynamicKeystroke && opts.travel_factor > 0.0 {
+    if row.mode == KeyMode::DynamicKeystroke {
         parts.push(format!(
-            "↧{:.2}mm",
-            row.dks_travel as f32 / opts.travel_factor
+            "↧{}",
+            TravelDepth::from_raw(row.dks_travel).format(opts.precision)
         ));
     }
     parts.join("  ")
@@ -196,7 +196,7 @@ mod tests {
 
     fn opts() -> ListOptions {
         ListOptions {
-            travel_factor: 100.0,
+            precision: Precision::Medium,
             ..Default::default()
         }
     }

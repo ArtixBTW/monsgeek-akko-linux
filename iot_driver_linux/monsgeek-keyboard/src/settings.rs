@@ -73,6 +73,30 @@ impl Precision {
     pub fn mm_to_raw(&self, mm: f64) -> u16 {
         (mm * self.factor()).round() as u16
     }
+
+    /// Decimal places needed to render one raw unit *exactly*.
+    ///
+    /// A device with 0.005mm units cannot be shown faithfully in two decimals,
+    /// so the display follows the device rather than a fixed width. Rendering at
+    /// this many places means no rounding happens on the way to the screen.
+    pub const fn decimals(&self) -> u32 {
+        match self {
+            Self::Coarse => 1, // 0.1mm
+            Self::Medium => 2, // 0.01mm
+            Self::Fine => 3,   // 0.005mm
+        }
+    }
+
+    /// Raw travel in micrometres — exact integer arithmetic, since 1000µm is a
+    /// whole multiple of every unit size (100 / 10 / 5 µm).
+    pub const fn raw_to_um(&self, raw: u16) -> u32 {
+        raw as u32
+            * match self {
+                Self::Coarse => 100,
+                Self::Medium => 10,
+                Self::Fine => 5,
+            }
+    }
 }
 
 /// Firmware version information
