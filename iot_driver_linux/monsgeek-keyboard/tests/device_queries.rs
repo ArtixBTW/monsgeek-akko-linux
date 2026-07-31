@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use monsgeek_keyboard::{KeyboardInterface, PollingRate, Precision};
+use monsgeek_keyboard::{KeyTriggerSettings, KeyboardInterface, PollingRate, Precision};
 use monsgeek_transport::{ChecksumType, FlowControlTransport, HidDiscovery, Transport};
 
 /// Open the preferred keyboard and create a KeyboardInterface.
@@ -508,4 +508,60 @@ fn assigned_grid_cells_survive_the_strip_round_trip() {
         read_back, expected,
         "grid cells assigned did not survive the strip round-trip"
     );
+}
+
+/// The magnetism `page` byte means a table page under `flag = 1` and a key index
+/// under `flag = 0`, with nothing in the wire format relating the two. This drives
+/// both forms against real firmware: a per-key write (`set_magnetism_simple`, the
+/// `flag = 0` path) followed by a paged read (`get_magnetism`, the `flag = 1`
+/// path), and asserts the byte landed on the key addressed and on no other.
+///
+/// Captures and restores the key's original value, so it is safe to re-run.
+#[test]
+#[ignore] // requires hardware with Hall-effect switches
+fn a_per_key_magnetism_write_lands_only_on_that_key() {
+    const KEY: u8 = 42;
+    /// Far from the 204 the board ships with, so a stale read cannot pass.
+    const PROBE_RAW: u16 = 155;
+
+    let (_t, kb) = open_keyboard();
+
+    let before = kb.get_all_triggers().expect("paged read");
+    let original = kb.get_key_trigger(KEY).expect("per-key read");
+    assert_ne!(
+        original.actuation, PROBE_RAW,
+        "probe value must differ from the starting value"
+    );
+
+    let probe = KeyTriggerSettings {
+        actuation: PROBE_RAW,
+        ..original.clone()
+    };
+    kb.set_key_trigger(&probe).expect("per-key write");
+    std::thread::sleep(Duration::from_millis(400));
+
+    let after = kb.get_all_triggers().expect("paged read");
+    kb.set_key_trigger(&original).expect("restore");
+    std::thread::sleep(Duration::from_millis(400));
+
+    assert_eq!(
+        after.press_travel[KEY as usize], PROBE_RAW,
+        "per-key write did not reach key {KEY}"
+    );
+    for (i, (&was, &now)) in before
+        .press_travel
+        .iter()
+        .zip(after.press_travel.iter())
+        .enumerate()
+    {
+        if i != KEY as usize {
+            assert_eq!(
+                was, now,
+                "key {i} changed too — `page` addressed a table page"
+            );
+        }
+    }
+
+    let restored = kb.get_key_trigger(KEY).expect("per-key read");
+    assert_eq!(restored.actuation, original.actuation, "restore failed");
 }

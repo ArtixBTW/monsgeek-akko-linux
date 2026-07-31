@@ -1381,16 +1381,47 @@ pub struct GetMacroData {
 }
 
 /// SET_MULTI_MAGNETISM (0x65) — 7-byte header + variable payload, Bit7 checksum.
+///
+/// `page` means two different things depending on `flag`, with nothing in the
+/// wire format relating them: in the **paged** form (`flag = 1`) it is a page of
+/// the whole-keyboard table, and in the **per-key** form (`flag = 0`) it is a key
+/// index. Build one through [`Self::paged`] or [`Self::per_key`] so the pair is
+/// always set together; the fields are private to keep it that way.
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct SetMultiMagnetismHeader {
-    pub sub_cmd: u8,
-    pub flag: u8,
-    pub page: u8,
-    pub commit: u8,
-    pub _pad0: u8,
-    pub _pad1: u8,
-    pub _checksum: u8,
+    sub_cmd: u8,
+    flag: u8,
+    page: u8,
+    commit: u8,
+    _pad0: u8,
+    _pad1: u8,
+    _checksum: u8,
+}
+
+impl SetMultiMagnetismHeader {
+    /// One page of the whole-keyboard table (`flag = 1`).
+    pub const fn paged(sub_cmd: u8, page: u8, commit: bool) -> Self {
+        Self::new(sub_cmd, 1, page, commit)
+    }
+
+    /// One key's own bytes (`flag = 0`, `page` carries the key index) — the
+    /// "simple" form, mirroring `_sendMagnetismInfoSimpleCMD` in the vendor app.
+    pub const fn per_key(sub_cmd: u8, key_index: u8, commit: bool) -> Self {
+        Self::new(sub_cmd, 0, key_index, commit)
+    }
+
+    const fn new(sub_cmd: u8, flag: u8, page: u8, commit: bool) -> Self {
+        Self {
+            sub_cmd,
+            flag,
+            page,
+            commit: commit as u8,
+            _pad0: 0,
+            _pad1: 0,
+            _checksum: 0,
+        }
+    }
 }
 
 /// Full SET_MULTI_MAGNETISM command: header + payload.
@@ -1411,12 +1442,35 @@ impl HidCommand for SetMultiMagnetismCommand {
 }
 
 /// GET_MULTI_MAGNETISM (0xE5) query data — 3 bytes.
+///
+/// `page` is a table page when `flag = 1` and a key index when `flag = 0`; see
+/// [`SetMultiMagnetismHeader`]. Build through [`Self::paged`] / [`Self::per_key`].
 #[derive(Debug, Clone, Copy, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct GetMultiMagnetismData {
-    pub sub_cmd: u8,
-    pub flag: u8,
-    pub page: u8,
+    sub_cmd: u8,
+    flag: u8,
+    page: u8,
+}
+
+impl GetMultiMagnetismData {
+    /// One page of the whole-keyboard table (`flag = 1`).
+    pub const fn paged(sub_cmd: u8, page: u8) -> Self {
+        Self {
+            sub_cmd,
+            flag: 1,
+            page,
+        }
+    }
+
+    /// One key's own bytes (`flag = 0`, `page` carries the key index).
+    pub const fn per_key(sub_cmd: u8, key_index: u8) -> Self {
+        Self {
+            sub_cmd,
+            flag: 0,
+            page: key_index,
+        }
+    }
 }
 
 /// SET_KEY_MAGNETISM_MODE (0x1D) — 4-byte data payload, Bit7 checksum.
@@ -2825,34 +2879,46 @@ mod tests {
         assert_eq!(pkt.as_bytes(), &[3, 2]);
     }
 
+    /// `page` byte 2 means a table page under `flag = 1` and a key index under
+    /// `flag = 0`. The two constructors must set the pair together, or a per-key
+    /// write addresses a page and silently hits the wrong keys.
     #[test]
     fn test_set_multi_magnetism_header_size_and_layout() {
         assert_eq!(std::mem::size_of::<SetMultiMagnetismHeader>(), 7);
-        let hdr = SetMultiMagnetismHeader {
-            sub_cmd: 0x01,
-            flag: 1,
-            page: 2,
-            commit: 1,
-            _pad0: 0,
-            _pad1: 0,
-            _checksum: 0,
-        };
-        let bytes = hdr.as_bytes();
-        assert_eq!(bytes[0], 0x01); // sub_cmd
-        assert_eq!(bytes[1], 1); // flag
-        assert_eq!(bytes[2], 2); // page
-        assert_eq!(bytes[3], 1); // commit
+
+        // Paged: flag 1, byte 2 is the page.
+        let paged = SetMultiMagnetismHeader::paged(0x01, 2, true);
+        assert_eq!(&paged.as_bytes()[..4], &[0x01, 1, 2, 1]);
+        assert_eq!(
+            &SetMultiMagnetismHeader::paged(0x01, 2, false).as_bytes()[..4],
+            &[0x01, 1, 2, 0]
+        );
+
+        // Per-key: flag 0, byte 2 is the key index — same position, other meaning.
+        let per_key = SetMultiMagnetismHeader::per_key(0x01, 2, true);
+        assert_eq!(&per_key.as_bytes()[..4], &[0x01, 0, 2, 1]);
+
+        // Padding and the checksum placeholder stay zero in both forms.
+        assert_eq!(&paged.as_bytes()[4..], &[0, 0, 0]);
+        assert_eq!(&per_key.as_bytes()[4..], &[0, 0, 0]);
     }
 
     #[test]
     fn test_get_multi_magnetism_data_size_and_layout() {
         assert_eq!(std::mem::size_of::<GetMultiMagnetismData>(), 3);
-        let pkt = GetMultiMagnetismData {
-            sub_cmd: 0x0A,
-            flag: 1,
-            page: 0,
-        };
-        assert_eq!(pkt.as_bytes(), &[0x0A, 1, 0]);
+        assert_eq!(
+            GetMultiMagnetismData::paged(0x0A, 0).as_bytes(),
+            &[0x0A, 1, 0]
+        );
+        assert_eq!(
+            GetMultiMagnetismData::paged(0x0A, 3).as_bytes(),
+            &[0x0A, 1, 3]
+        );
+        // Same byte 2, but a key index rather than a page.
+        assert_eq!(
+            GetMultiMagnetismData::per_key(0x0A, 3).as_bytes(),
+            &[0x0A, 0, 3]
+        );
     }
 
     #[test]

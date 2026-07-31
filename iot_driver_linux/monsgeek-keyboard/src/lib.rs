@@ -850,11 +850,7 @@ impl KeyboardInterface {
         let mut all_data = Vec::new();
 
         for page in 0..num_pages {
-            let query = GetMultiMagnetismData {
-                sub_cmd,
-                flag: 1,
-                page: page as u8,
-            };
+            let query = GetMultiMagnetismData::paged(sub_cmd, page as u8);
             match self.transport.query_raw(
                 cmd::GET_MULTI_MAGNETISM,
                 query.as_bytes(),
@@ -936,15 +932,7 @@ impl KeyboardInterface {
         for (page, chunk) in bytes.chunks(PAGE_SIZE).enumerate() {
             let is_last = page == num_pages - 1;
             let cmd = SetMultiMagnetismCommand {
-                header: SetMultiMagnetismHeader {
-                    sub_cmd,
-                    flag: 1,
-                    page: page as u8,
-                    commit: if is_last { 1 } else { 0 },
-                    _pad0: 0,
-                    _pad1: 0,
-                    _checksum: 0,
-                },
+                header: SetMultiMagnetismHeader::paged(sub_cmd, page as u8, is_last),
                 payload: chunk.to_vec(),
             };
 
@@ -1023,15 +1011,7 @@ impl KeyboardInterface {
         payload: &[u8],
     ) -> Result<(), KeyboardError> {
         let pkt = SetMultiMagnetismCommand {
-            header: SetMultiMagnetismHeader {
-                sub_cmd,
-                flag: 0,
-                page: key_index,
-                commit: is_final as u8,
-                _pad0: 0,
-                _pad1: 0,
-                _checksum: 0,
-            },
+            header: SetMultiMagnetismHeader::per_key(sub_cmd, key_index, is_final),
             payload: payload.to_vec(),
         };
         // After the final write of a batch (commit=1) the firmware needs to settle
@@ -1472,11 +1452,7 @@ impl KeyboardInterface {
     /// # Returns
     /// Vector of 16-bit calibration values for up to 32 keys
     pub fn get_calibration_progress(&self, page: u8) -> Result<Vec<u16>, KeyboardError> {
-        let query = GetMultiMagnetismData {
-            sub_cmd: mag_cmd::CALIBRATION,
-            flag: 1,
-            page,
-        };
+        let query = GetMultiMagnetismData::paged(mag_cmd::CALIBRATION, page);
         let response = self.transport.query_raw(
             cmd::GET_MULTI_MAGNETISM,
             query.as_bytes(),
