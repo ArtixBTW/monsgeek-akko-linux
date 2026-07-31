@@ -590,3 +590,50 @@ mod tests {
         assert!(DksBinding::from_packed_mode(0, [0; 4]).is_empty());
     }
 }
+
+/// `TravelDepth` is the only float entry point for travel, and it rounds.
+/// The call sites it replaced used `(mm * factor) as u16`, which truncates.
+#[cfg(test)]
+mod travel_depth_tests {
+    use super::TravelDepth;
+    use crate::settings::Precision;
+
+    /// A millimetre value whose f32 product falls just under a raw unit must
+    /// round up, not truncate. `(mm * factor) as u16` stored 1.05mm as 104 and
+    /// 0.53mm as 52 — a unit shallower than the user asked for. Fourteen of the
+    /// 401 two-decimal values in 0.00..=4.00mm are affected at 0.01mm precision,
+    /// and 184 of them at 0.1mm.
+    #[test]
+    fn from_mm_rounds_rather_than_truncating() {
+        let p = Precision::Medium; // 0.01mm per raw unit
+        for (mm, expect) in [(1.05f32, 105u16), (0.53, 53), (1.06, 106), (1.17, 117)] {
+            assert_eq!(TravelDepth::from_mm(mm, p).raw(), expect);
+            // The form this replaced landed one unit low:
+            assert_eq!(
+                (mm * 100.0) as u16,
+                expect - 1,
+                "{mm} was not a truncation witness"
+            );
+        }
+        // Values that were already exact stay exact.
+        assert_eq!(TravelDepth::from_mm(1.5, p).raw(), 150);
+        assert_eq!(TravelDepth::from_mm(0.3, p).raw(), 30);
+        assert_eq!(TravelDepth::from_mm(2.0, p).raw(), 200);
+    }
+
+    /// Every raw value round-trips through mm at every precision, so displaying a
+    /// stored value and reading it back cannot shift it.
+    #[test]
+    fn raw_survives_a_round_trip_through_mm() {
+        for p in [Precision::Coarse, Precision::Medium, Precision::Fine] {
+            for raw in [0u16, 1, 30, 150, 204, 205, 400, 800] {
+                let d = TravelDepth::from_raw(raw);
+                assert_eq!(
+                    TravelDepth::from_mm(d.to_mm(p), p).raw(),
+                    raw,
+                    "{p:?}: raw {raw} did not survive"
+                );
+            }
+        }
+    }
+}

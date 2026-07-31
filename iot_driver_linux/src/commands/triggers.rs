@@ -4,7 +4,7 @@ use super::CommandResult;
 use iot_driver::key_action::KeyAction;
 use monsgeek_keyboard::{
     DksAction, DksBinding, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, KeyboardInterface,
-    ModeByte,
+    ModeByte, TravelDepth,
 };
 use monsgeek_transport::protocol::KeymatrixLayer;
 use std::collections::{BTreeSet, HashSet};
@@ -504,10 +504,13 @@ pub fn triggers(keyboard: &KeyboardInterface) -> CommandResult {
 /// Set actuation point for all keys
 pub fn set_actuation(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    let factor = precision.factor() as f32;
-    let raw = (mm * factor) as u16;
-    match keyboard.set_actuation_all_u16(raw) {
-        Ok(_) => println!("Actuation point set to {mm:.2}mm (raw: {raw}) for all keys"),
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    let travel = TravelDepth::from_mm(mm, precision);
+    match keyboard.set_actuation_all(travel) {
+        Ok(_) => println!(
+            "Actuation point set to {mm:.2}mm (raw: {}) for all keys",
+            travel.raw()
+        ),
         Err(e) => eprintln!("Failed to set actuation point: {e}"),
     }
     Ok(())
@@ -516,7 +519,6 @@ pub fn set_actuation(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
 /// Enable/disable Rapid Trigger or set sensitivity
 pub fn set_rt(keyboard: &KeyboardInterface, value: &str) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    let factor = precision.factor() as f32;
 
     match value.to_lowercase().as_str() {
         "off" | "0" | "disable" => match keyboard.set_rapid_trigger_all(false) {
@@ -524,18 +526,18 @@ pub fn set_rt(keyboard: &KeyboardInterface, value: &str) -> CommandResult {
             Err(e) => eprintln!("Failed to disable Rapid Trigger: {e}"),
         },
         "on" | "enable" => {
-            let sensitivity = (0.3 * factor) as u16;
+            let sensitivity = TravelDepth::from_mm(0.3, precision);
             let _ = keyboard.set_rapid_trigger_all(true);
-            let _ = keyboard.set_rt_press_all_u16(sensitivity);
-            let _ = keyboard.set_rt_lift_all_u16(sensitivity);
+            let _ = keyboard.set_rt_press_all(sensitivity);
+            let _ = keyboard.set_rt_lift_all(sensitivity);
             println!("Rapid Trigger enabled with 0.3mm sensitivity for all keys");
         }
         _ => {
             let mm: f32 = value.parse().unwrap_or(0.3);
-            let sensitivity = (mm * factor) as u16;
+            let sensitivity = TravelDepth::from_mm(mm, precision);
             let _ = keyboard.set_rapid_trigger_all(true);
-            let _ = keyboard.set_rt_press_all_u16(sensitivity);
-            let _ = keyboard.set_rt_lift_all_u16(sensitivity);
+            let _ = keyboard.set_rt_press_all(sensitivity);
+            let _ = keyboard.set_rt_lift_all(sensitivity);
             println!("Rapid Trigger enabled with {mm:.2}mm sensitivity for all keys");
         }
     }
@@ -545,10 +547,13 @@ pub fn set_rt(keyboard: &KeyboardInterface, value: &str) -> CommandResult {
 /// Set release point for all keys
 pub fn set_release(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    let factor = precision.factor() as f32;
-    let raw = (mm * factor) as u16;
-    match keyboard.set_release_all_u16(raw) {
-        Ok(_) => println!("Release point set to {mm:.2}mm (raw: {raw}) for all keys"),
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    let travel = TravelDepth::from_mm(mm, precision);
+    match keyboard.set_release_all(travel) {
+        Ok(_) => println!(
+            "Release point set to {mm:.2}mm (raw: {}) for all keys",
+            travel.raw()
+        ),
         Err(e) => eprintln!("Failed to set release point: {e}"),
     }
     Ok(())
@@ -557,10 +562,13 @@ pub fn set_release(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
 /// Set bottom deadzone for all keys
 pub fn set_bottom_deadzone(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    let factor = precision.factor() as f32;
-    let raw = (mm * factor) as u16;
-    match keyboard.set_bottom_deadzone_all_u16(raw) {
-        Ok(_) => println!("Bottom deadzone set to {mm:.2}mm (raw: {raw}) for all keys"),
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    let travel = TravelDepth::from_mm(mm, precision);
+    match keyboard.set_bottom_deadzone_all(travel) {
+        Ok(_) => println!(
+            "Bottom deadzone set to {mm:.2}mm (raw: {}) for all keys",
+            travel.raw()
+        ),
         Err(e) => eprintln!("Failed to set bottom deadzone: {e}"),
     }
     Ok(())
@@ -569,10 +577,13 @@ pub fn set_bottom_deadzone(keyboard: &KeyboardInterface, mm: f32) -> CommandResu
 /// Set top deadzone for all keys
 pub fn set_top_deadzone(keyboard: &KeyboardInterface, mm: f32) -> CommandResult {
     let precision = keyboard.get_precision().unwrap_or_default();
-    let factor = precision.factor() as f32;
-    let raw = (mm * factor) as u16;
-    match keyboard.set_top_deadzone_all_u16(raw) {
-        Ok(_) => println!("Top deadzone set to {mm:.2}mm (raw: {raw}) for all keys"),
+    // `from_mm` rounds; `(mm * factor) as u16` truncated, so 2.05mm stored as 204.
+    let travel = TravelDepth::from_mm(mm, precision);
+    match keyboard.set_top_deadzone_all(travel) {
+        Ok(_) => println!(
+            "Top deadzone set to {mm:.2}mm (raw: {}) for all keys",
+            travel.raw()
+        ),
         Err(e) => eprintln!("Failed to set top deadzone: {e}"),
     }
     Ok(())
@@ -605,10 +616,10 @@ pub fn set_key_trigger(
     let settings = KeyTriggerSettings {
         key_index: key,
         actuation: actuation
-            .map(|mm| (mm * factor) as u16)
+            .map(|mm| TravelDepth::from_mm(mm, precision).raw())
             .unwrap_or(current.actuation),
         deactuation: release
-            .map(|mm| (mm * factor) as u16)
+            .map(|mm| TravelDepth::from_mm(mm, precision).raw())
             .unwrap_or(current.deactuation),
         mode: mode.unwrap_or(current.mode),
         rapid_trigger: rt.unwrap_or(current.rapid_trigger),

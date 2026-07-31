@@ -11,6 +11,7 @@ use crate::tui::widgets::PopupSelect;
 use crate::TriggerSettings;
 use monsgeek_keyboard::{
     DksAction, DksBinding, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, ModeByte, Precision,
+    TravelDepth,
 };
 use monsgeek_transport::protocol::{HidUsage, KeymatrixLayer, Layer};
 
@@ -181,49 +182,24 @@ impl TriggerField {
         }
     }
 
-    /// Get spinner configuration for this field (None for Mode which is cycled)
-    pub(in crate::tui) fn spinner_config(&self) -> Option<SpinnerConfig> {
+    /// Spinner configuration for this field, or `None` for the fields that are
+    /// cycled or edited through a popup.
+    ///
+    /// Travel bounds are stated in millimetres and converted to raw units here,
+    /// once — the spinner itself then steps in raw units, so an edit cannot drift.
+    pub(in crate::tui) fn spinner_config(&self, precision: Precision) -> Option<SpinnerConfig> {
         match self {
-            Self::Actuation | Self::Release => Some(SpinnerConfig {
-                min: 0.1,
-                max: 4.0,
-                step: 0.05,
-                step_coarse: 0.2,
-                decimals: 2,
-                unit: "mm",
-            }),
-            Self::RtPress | Self::RtLift => Some(SpinnerConfig {
-                min: 0.1,
-                max: 2.0,
-                step: 0.05,
-                step_coarse: 0.1,
-                decimals: 2,
-                unit: "mm",
-            }),
-            Self::TopDeadzone | Self::BottomDeadzone => Some(SpinnerConfig {
-                min: 0.0,
-                max: 1.0,
-                step: 0.05,
-                step_coarse: 0.1,
-                decimals: 2,
-                unit: "mm",
-            }),
-            Self::ModTapTime => Some(SpinnerConfig {
-                min: 0.0,
-                max: 2550.0,
-                step: 10.0,
-                step_coarse: 100.0,
-                decimals: 0,
-                unit: "ms",
-            }),
-            Self::DksTravel => Some(SpinnerConfig {
-                min: 0.1,
-                max: 4.0,
-                step: 0.05,
-                step_coarse: 0.2,
-                decimals: 2,
-                unit: "mm",
-            }),
+            Self::Actuation | Self::Release => {
+                Some(SpinnerConfig::travel_mm(0.1, 4.0, 0.05, 0.2, precision))
+            }
+            Self::RtPress | Self::RtLift => {
+                Some(SpinnerConfig::travel_mm(0.1, 2.0, 0.05, 0.1, precision))
+            }
+            Self::TopDeadzone | Self::BottomDeadzone => {
+                Some(SpinnerConfig::travel_mm(0.0, 1.0, 0.05, 0.1, precision))
+            }
+            Self::ModTapTime => Some(SpinnerConfig::integer(0, 2550, 10, 100, "ms")),
+            Self::DksTravel => Some(SpinnerConfig::travel_mm(0.1, 4.0, 0.05, 0.2, precision)),
             // Mode / SnapTapPartner / DKS pickers open popups; RapidTrigger toggles.
             Self::Mode
             | Self::RapidTrigger
@@ -252,12 +228,12 @@ impl TriggerField {
 }
 
 /// Fallback DKS trigger point when the device read fails.
-const DEFAULT_DKS_TRAVEL_MM: f32 = 0.7;
+const DEFAULT_DKS_TRAVEL_MM: f64 = 0.7;
 
 /// DKS fields loaded when opening a per-key trigger edit modal.
 #[derive(Debug, Clone)]
 pub(in crate::tui) struct DksEditState {
-    pub travel_mm: f32,
+    pub travel_raw: u16,
     /// Phase roles per output slot; the slot outputs themselves live in
     /// [`PerKeyEditPrefetch::slots`], since they *are* the keymatrix layers.
     pub phases: [[DksAction; 4]; 4],
@@ -289,13 +265,16 @@ pub(in crate::tui) struct TriggerEditModal {
     pub depth_history: VecDeque<f32>,
     /// Key to filter depth reports (None = show all active keys)
     pub depth_filter: Option<usize>,
-    /// Current values being edited
-    pub actuation_mm: f32,
-    pub release_mm: f32,
-    pub rt_press_mm: f32,
-    pub rt_lift_mm: f32,
-    pub top_dz_mm: f32,
-    pub bottom_dz_mm: f32,
+    /// Device travel precision, for rendering and for sizing the spinners.
+    pub precision: Precision,
+    /// Current values being edited, in raw firmware units — the form they are
+    /// stored and sent in, so opening and closing unchanged is bit-identical.
+    pub actuation: TravelDepth,
+    pub release: TravelDepth,
+    pub rt_press: TravelDepth,
+    pub rt_lift: TravelDepth,
+    pub top_dz: TravelDepth,
+    pub bottom_dz: TravelDepth,
     /// Full mode byte (base mode in low 7 bits, RT flag in `0x80`)
     pub mode: u8,
     /// Mod-Tap tap-vs-hold decision time in ms (per-key only)
@@ -308,8 +287,8 @@ pub(in crate::tui) struct TriggerEditModal {
     pub mode_picker: Option<PopupSelect<KeyMode>>,
     /// Open Snap-Tap partner picker, when choosing a partner key (`None` = unbound)
     pub key_picker: Option<PopupSelect<Option<u8>>>,
-    /// DKS trigger-point travel in mm (per-key only; R1/R4 shallow depth)
-    pub dks_travel_mm: f32,
+    /// DKS trigger-point travel (per-key only; R1/R4 shallow depth)
+    pub dks_travel: TravelDepth,
     /// Phase roles per DKS output slot (per-key only)
     pub dks_phases: [[DksAction; 4]; 4],
     /// Which DKS slot (0–3) the DKS fields edit
@@ -338,25 +317,26 @@ pub(in crate::tui) struct TriggerEditModal {
 impl TriggerEditModal {
     /// Create modal for editing global settings
     pub(in crate::tui) fn new_global(triggers: &TriggerSettings, precision: Precision) -> Self {
-        let factor = precision.factor() as f32;
+        let first = |v: &Vec<u16>| TravelDepth::from_raw(v.first().copied().unwrap_or(0));
         Self {
             target: TriggerEditTarget::Global,
             field_index: 0,
             depth_history: VecDeque::with_capacity(100),
             depth_filter: None,
-            actuation_mm: triggers.press_travel.first().copied().unwrap_or(0) as f32 / factor,
-            release_mm: triggers.lift_travel.first().copied().unwrap_or(0) as f32 / factor,
-            rt_press_mm: triggers.rt_press.first().copied().unwrap_or(0) as f32 / factor,
-            rt_lift_mm: triggers.rt_lift.first().copied().unwrap_or(0) as f32 / factor,
-            top_dz_mm: triggers.top_deadzone.first().copied().unwrap_or(0) as f32 / factor,
-            bottom_dz_mm: triggers.bottom_deadzone.first().copied().unwrap_or(0) as f32 / factor,
+            precision,
+            actuation: first(&triggers.press_travel),
+            release: first(&triggers.lift_travel),
+            rt_press: first(&triggers.rt_press),
+            rt_lift: first(&triggers.rt_lift),
+            top_dz: first(&triggers.top_deadzone),
+            bottom_dz: first(&triggers.bottom_deadzone),
             mode: triggers.key_modes.first().copied().unwrap_or(0),
             modtap_ms: 0,
             snaptap_partner: None,
             key_choices: Vec::new(),
             mode_picker: None,
             key_picker: None,
-            dks_travel_mm: 0.0,
+            dks_travel: TravelDepth::default(),
             dks_phases: [[DksAction::default(); 4]; 4],
             dks_binding_index: 0,
             dks_action_picker: None,
@@ -379,31 +359,26 @@ impl TriggerEditModal {
         precision: Precision,
         prefetch: PerKeyEditPrefetch,
     ) -> Self {
-        let factor = precision.factor() as f32;
+        let at = |v: &Vec<u16>| TravelDepth::from_raw(v.get(key_index).copied().unwrap_or(0));
         Self {
             target: TriggerEditTarget::PerKey { key_index },
             field_index: 0,
             depth_history: VecDeque::with_capacity(100),
             depth_filter: Some(key_index),
-            actuation_mm: triggers.press_travel.get(key_index).copied().unwrap_or(0) as f32
-                / factor,
-            release_mm: triggers.lift_travel.get(key_index).copied().unwrap_or(0) as f32 / factor,
-            rt_press_mm: triggers.rt_press.get(key_index).copied().unwrap_or(0) as f32 / factor,
-            rt_lift_mm: triggers.rt_lift.get(key_index).copied().unwrap_or(0) as f32 / factor,
-            top_dz_mm: triggers.top_deadzone.get(key_index).copied().unwrap_or(0) as f32 / factor,
-            bottom_dz_mm: triggers
-                .bottom_deadzone
-                .get(key_index)
-                .copied()
-                .unwrap_or(0) as f32
-                / factor,
+            precision,
+            actuation: at(&triggers.press_travel),
+            release: at(&triggers.lift_travel),
+            rt_press: at(&triggers.rt_press),
+            rt_lift: at(&triggers.rt_lift),
+            top_dz: at(&triggers.top_deadzone),
+            bottom_dz: at(&triggers.bottom_deadzone),
             mode: triggers.key_modes.get(key_index).copied().unwrap_or(0),
             modtap_ms: prefetch.modtap_ms,
             snaptap_partner: prefetch.snaptap_partner,
             key_choices: prefetch.key_choices,
             mode_picker: None,
             key_picker: None,
-            dks_travel_mm: prefetch.dks.travel_mm,
+            dks_travel: TravelDepth::from_raw(prefetch.dks.travel_raw),
             dks_phases: prefetch.dks.phases,
             dks_binding_index: 0,
             dks_action_picker: None,
@@ -460,16 +435,22 @@ impl TriggerEditModal {
 
     /// Get the current value for the selected spinner field (0.0 for
     /// non-spinner fields, which are edited by other means).
-    pub(in crate::tui) fn current_value(&self) -> f32 {
-        match self.current_field() {
-            TriggerField::Actuation => self.actuation_mm,
-            TriggerField::Release => self.release_mm,
-            TriggerField::RtPress => self.rt_press_mm,
-            TriggerField::RtLift => self.rt_lift_mm,
-            TriggerField::TopDeadzone => self.top_dz_mm,
-            TriggerField::BottomDeadzone => self.bottom_dz_mm,
-            TriggerField::ModTapTime => self.modtap_ms as f32,
-            TriggerField::DksTravel => self.dks_travel_mm,
+    pub(in crate::tui) fn current_value(&self) -> u16 {
+        self.value_of(self.current_field())
+    }
+
+    /// The raw value backing a spinner field (0 for the fields edited by other
+    /// means). Shared by the key handler and the renderer.
+    pub(in crate::tui) fn value_of(&self, field: TriggerField) -> u16 {
+        match field {
+            TriggerField::Actuation => self.actuation.raw(),
+            TriggerField::Release => self.release.raw(),
+            TriggerField::RtPress => self.rt_press.raw(),
+            TriggerField::RtLift => self.rt_lift.raw(),
+            TriggerField::TopDeadzone => self.top_dz.raw(),
+            TriggerField::BottomDeadzone => self.bottom_dz.raw(),
+            TriggerField::ModTapTime => self.modtap_ms,
+            TriggerField::DksTravel => self.dks_travel.raw(),
             TriggerField::Mode
             | TriggerField::RapidTrigger
             | TriggerField::OutputLayer
@@ -481,21 +462,21 @@ impl TriggerEditModal {
             | TriggerField::DksAct1
             | TriggerField::DksAct2
             | TriggerField::DksAct3
-            | TriggerField::Save => 0.0,
+            | TriggerField::Save => 0,
         }
     }
 
     /// Set the value for the selected spinner field.
-    pub(in crate::tui) fn set_current_value(&mut self, value: f32) {
+    pub(in crate::tui) fn set_current_value(&mut self, value: u16) {
         match self.current_field() {
-            TriggerField::Actuation => self.actuation_mm = value,
-            TriggerField::Release => self.release_mm = value,
-            TriggerField::RtPress => self.rt_press_mm = value,
-            TriggerField::RtLift => self.rt_lift_mm = value,
-            TriggerField::TopDeadzone => self.top_dz_mm = value,
-            TriggerField::BottomDeadzone => self.bottom_dz_mm = value,
-            TriggerField::ModTapTime => self.modtap_ms = value.clamp(0.0, 2550.0) as u16,
-            TriggerField::DksTravel => self.dks_travel_mm = value,
+            TriggerField::Actuation => self.actuation = TravelDepth::from_raw(value),
+            TriggerField::Release => self.release = TravelDepth::from_raw(value),
+            TriggerField::RtPress => self.rt_press = TravelDepth::from_raw(value),
+            TriggerField::RtLift => self.rt_lift = TravelDepth::from_raw(value),
+            TriggerField::TopDeadzone => self.top_dz = TravelDepth::from_raw(value),
+            TriggerField::BottomDeadzone => self.bottom_dz = TravelDepth::from_raw(value),
+            TriggerField::ModTapTime => self.modtap_ms = value,
+            TriggerField::DksTravel => self.dks_travel = TravelDepth::from_raw(value),
             TriggerField::Mode
             | TriggerField::RapidTrigger
             | TriggerField::OutputLayer
@@ -548,7 +529,7 @@ impl TriggerEditModal {
             }
             TriggerField::RapidTrigger => self.toggle_rapid_trigger(),
             field => {
-                if let Some(config) = field.spinner_config() {
+                if let Some(config) = field.spinner_config(self.precision) {
                     let new_value = config.increment(self.current_value(), coarse);
                     self.set_current_value(new_value);
                 }
@@ -571,7 +552,7 @@ impl TriggerEditModal {
             }
             TriggerField::RapidTrigger => self.toggle_rapid_trigger(),
             field => {
-                if let Some(config) = field.spinner_config() {
+                if let Some(config) = field.spinner_config(self.precision) {
                     let new_value = config.decrement(self.current_value(), coarse);
                     self.set_current_value(new_value);
                 }
@@ -902,7 +883,7 @@ impl App {
             None => (0, None),
         };
         let key_choices = self.key_choices();
-        let factor = self.precision.factor() as f32;
+        let precision = self.precision;
         let kb = self.keyboard.as_ref();
 
         // Keymatrix layers 0–3 and the DKS travel/phase data come from one read:
@@ -927,10 +908,10 @@ impl App {
             }),
         };
         let dks = DksEditState {
-            travel_mm: dks_cfg
+            travel_raw: dks_cfg
                 .as_ref()
-                .map(|c| c.trigger_point_travel_raw as f32 / factor)
-                .unwrap_or(DEFAULT_DKS_TRAVEL_MM),
+                .map(|c| c.trigger_point_travel_raw)
+                .unwrap_or_else(|| precision.mm_to_raw(DEFAULT_DKS_TRAVEL_MM)),
             phases: dks_cfg
                 .as_ref()
                 .map(|c| std::array::from_fn(|i| c.bindings[i].phase_actions))
@@ -997,43 +978,36 @@ impl App {
         };
 
         let precision = self.precision;
-        let factor = precision.factor() as f32;
 
         match modal.target {
             TriggerEditTarget::Global => {
-                // Apply all global settings
-                let actuation_raw = (modal.actuation_mm * factor) as u16;
-                let release_raw = (modal.release_mm * factor) as u16;
-                let rt_press_raw = (modal.rt_press_mm * factor) as u16;
-                let rt_lift_raw = (modal.rt_lift_mm * factor) as u16;
-                let top_dz_raw = (modal.top_dz_mm * factor) as u16;
-                let bottom_dz_raw = (modal.bottom_dz_mm * factor) as u16;
-
+                // The modal already holds raw units, so saving is not a conversion.
                 let mut errors = Vec::new();
 
-                if let Err(e) = keyboard.set_actuation_all_u16(actuation_raw) {
+                if let Err(e) = keyboard.set_actuation_all(modal.actuation) {
                     errors.push(format!("actuation: {e}"));
                 }
-                if let Err(e) = keyboard.set_release_all_u16(release_raw) {
+                if let Err(e) = keyboard.set_release_all(modal.release) {
                     errors.push(format!("release: {e}"));
                 }
-                if let Err(e) = keyboard.set_rt_press_all_u16(rt_press_raw) {
+                if let Err(e) = keyboard.set_rt_press_all(modal.rt_press) {
                     errors.push(format!("rt_press: {e}"));
                 }
-                if let Err(e) = keyboard.set_rt_lift_all_u16(rt_lift_raw) {
+                if let Err(e) = keyboard.set_rt_lift_all(modal.rt_lift) {
                     errors.push(format!("rt_lift: {e}"));
                 }
-                if let Err(e) = keyboard.set_top_deadzone_all_u16(top_dz_raw) {
+                if let Err(e) = keyboard.set_top_deadzone_all(modal.top_dz) {
                     errors.push(format!("top_dz: {e}"));
                 }
-                if let Err(e) = keyboard.set_bottom_deadzone_all_u16(bottom_dz_raw) {
+                if let Err(e) = keyboard.set_bottom_deadzone_all(modal.bottom_dz) {
                     errors.push(format!("bottom_dz: {e}"));
                 }
 
                 if errors.is_empty() {
                     self.status_msg = format!(
-                        "Global triggers saved: act={:.2}mm rel={:.2}mm",
-                        modal.actuation_mm, modal.release_mm
+                        "Global triggers saved: act={} rel={}",
+                        modal.actuation.format(precision),
+                        modal.release.format(precision)
                     );
                     // Reload triggers to reflect changes
                     self.load_triggers();
@@ -1049,8 +1023,8 @@ impl App {
                 let mode_byte = ModeByte::from_u8(modal.mode);
                 let settings = KeyTriggerSettings {
                     key_index: key_index as u8,
-                    actuation: (modal.actuation_mm * factor) as u16,
-                    deactuation: (modal.release_mm * factor) as u16,
+                    actuation: modal.actuation.raw(),
+                    deactuation: modal.release.raw(),
                     mode: mode_byte.base,
                     rapid_trigger: mode_byte.rapid_trigger,
                 };
@@ -1086,7 +1060,7 @@ impl App {
                                 )
                             });
                             let config = DksConfig {
-                                trigger_point_travel_raw: (modal.dks_travel_mm * factor) as u16,
+                                trigger_point_travel_raw: modal.dks_travel.raw(),
                                 bindings,
                             };
                             if let Err(e) =
@@ -1133,11 +1107,11 @@ impl App {
                         let key_name = get_key_label(self, key_index);
                         self.status_msg = if extra.is_empty() {
                             format!(
-                                "Key {} ({}) saved: act={:.1}mm rel={:.1}mm mode={}",
+                                "Key {} ({}) saved: act={} rel={} mode={}",
                                 key_index,
                                 key_name,
-                                modal.actuation_mm,
-                                modal.release_mm,
+                                modal.actuation.format(precision),
+                                modal.release.format(precision),
                                 ModeByte::new(settings.mode, settings.rapid_trigger),
                             )
                         } else {
@@ -1314,22 +1288,12 @@ fn render_modal_depth_chart(f: &mut Frame, modal: &TriggerEditModal, app: &App, 
 
     // Create threshold lines
     let max_samples = 100.0;
-    let actuation_line: Vec<(f64, f64)> = vec![
-        (0.0, modal.actuation_mm as f64),
-        (max_samples, modal.actuation_mm as f64),
-    ];
-    let release_line: Vec<(f64, f64)> = vec![
-        (0.0, modal.release_mm as f64),
-        (max_samples, modal.release_mm as f64),
-    ];
-    let top_dz_line: Vec<(f64, f64)> = vec![
-        (0.0, modal.top_dz_mm as f64),
-        (max_samples, modal.top_dz_mm as f64),
-    ];
-    let bottom_dz_line: Vec<(f64, f64)> = vec![
-        (0.0, (4.0 - modal.bottom_dz_mm) as f64),
-        (max_samples, (4.0 - modal.bottom_dz_mm) as f64),
-    ];
+    let mm = |d: TravelDepth| modal.precision.raw_to_mm(d.raw());
+    let level = |y: f64| -> Vec<(f64, f64)> { vec![(0.0, y), (max_samples, y)] };
+    let actuation_line = level(mm(modal.actuation));
+    let release_line = level(mm(modal.release));
+    let top_dz_line = level(mm(modal.top_dz));
+    let bottom_dz_line = level(4.0 - mm(modal.bottom_dz));
 
     let mut datasets = vec![
         // Depth trace
@@ -1356,7 +1320,7 @@ fn render_modal_depth_chart(f: &mut Frame, modal: &TriggerEditModal, app: &App, 
     ];
 
     // Only show deadzone lines if non-zero
-    if modal.top_dz_mm > 0.01 {
+    if modal.top_dz.raw() > 0 {
         datasets.push(
             Dataset::default()
                 .name("TopDZ")
@@ -1366,7 +1330,7 @@ fn render_modal_depth_chart(f: &mut Frame, modal: &TriggerEditModal, app: &App, 
                 .data(&top_dz_line),
         );
     }
-    if modal.bottom_dz_mm > 0.01 {
+    if modal.bottom_dz.raw() > 0 {
         datasets.push(
             Dataset::default()
                 .name("BotDZ")
@@ -1473,30 +1437,10 @@ fn render_modal_fields(f: &mut Frame, modal: &TriggerEditModal, area: Rect) {
                 )
             }
             _ => {
-                let config = field.spinner_config().expect("spinner field");
-                let val = match field {
-                    TriggerField::Actuation => modal.actuation_mm,
-                    TriggerField::Release => modal.release_mm,
-                    TriggerField::RtPress => modal.rt_press_mm,
-                    TriggerField::RtLift => modal.rt_lift_mm,
-                    TriggerField::TopDeadzone => modal.top_dz_mm,
-                    TriggerField::BottomDeadzone => modal.bottom_dz_mm,
-                    TriggerField::ModTapTime => modal.modtap_ms as f32,
-                    TriggerField::DksTravel => modal.dks_travel_mm,
-                    TriggerField::Mode
-                    | TriggerField::RapidTrigger
-                    | TriggerField::OutputLayer
-                    | TriggerField::Output
-                    | TriggerField::SnapTapPartner
-                    | TriggerField::DksBinding
-                    | TriggerField::Save
-                    | TriggerField::DksBindingKey
-                    | TriggerField::DksAct0
-                    | TriggerField::DksAct1
-                    | TriggerField::DksAct2
-                    | TriggerField::DksAct3 => unreachable!(),
-                };
-                (config.format(val), config.unit)
+                let config = field
+                    .spinner_config(modal.precision)
+                    .expect("spinner field");
+                (config.format(modal.value_of(*field)), config.unit())
             }
         };
 

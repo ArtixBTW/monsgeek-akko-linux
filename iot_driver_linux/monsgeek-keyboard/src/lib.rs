@@ -951,29 +951,27 @@ impl KeyboardInterface {
         Ok(())
     }
 
-    /// Set actuation point for all keys (u16 raw value)
-    ///
-    /// Value is in precision units (e.g., 200 = 2.0mm at 0.01mm precision)
-    pub fn set_actuation_all_u16(&self, travel: u16) -> Result<(), KeyboardError> {
-        let values = vec![travel; self.key_count as usize];
+    /// Set the actuation point for all keys.
+    pub fn set_actuation_all(&self, travel: TravelDepth) -> Result<(), KeyboardError> {
+        let values = vec![travel.raw(); self.key_count as usize];
         self.set_magnetism_u16(mag_cmd::PRESS_TRAVEL, &values)
     }
 
-    /// Set release point for all keys (u16 raw value)
-    pub fn set_release_all_u16(&self, travel: u16) -> Result<(), KeyboardError> {
-        let values = vec![travel; self.key_count as usize];
+    /// Set the release point for all keys.
+    pub fn set_release_all(&self, travel: TravelDepth) -> Result<(), KeyboardError> {
+        let values = vec![travel.raw(); self.key_count as usize];
         self.set_magnetism_u16(mag_cmd::LIFT_TRAVEL, &values)
     }
 
-    /// Set Rapid Trigger press sensitivity for all keys (u16 raw value)
-    pub fn set_rt_press_all_u16(&self, sensitivity: u16) -> Result<(), KeyboardError> {
-        let values = vec![sensitivity; self.key_count as usize];
+    /// Set Rapid Trigger press sensitivity for all keys.
+    pub fn set_rt_press_all(&self, travel: TravelDepth) -> Result<(), KeyboardError> {
+        let values = vec![travel.raw(); self.key_count as usize];
         self.set_magnetism_u16(mag_cmd::RT_PRESS, &values)
     }
 
-    /// Set Rapid Trigger release sensitivity for all keys (u16 raw value)
-    pub fn set_rt_lift_all_u16(&self, sensitivity: u16) -> Result<(), KeyboardError> {
-        let values = vec![sensitivity; self.key_count as usize];
+    /// Set Rapid Trigger release sensitivity for all keys.
+    pub fn set_rt_lift_all(&self, travel: TravelDepth) -> Result<(), KeyboardError> {
+        let values = vec![travel.raw(); self.key_count as usize];
         self.set_magnetism_u16(mag_cmd::RT_LIFT, &values)
     }
 
@@ -1245,19 +1243,17 @@ impl KeyboardInterface {
         Ok(())
     }
 
-    /// Set bottom deadzone for all keys (u16 raw value)
-    ///
-    /// Bottom deadzone is the distance from bottom of travel that is ignored.
-    pub fn set_bottom_deadzone_all_u16(&self, travel: u16) -> Result<(), KeyboardError> {
-        let values = vec![travel; self.key_count as usize];
+    /// Set the bottom deadzone for all keys — the distance from the bottom of
+    /// travel that is ignored.
+    pub fn set_bottom_deadzone_all(&self, travel: TravelDepth) -> Result<(), KeyboardError> {
+        let values = vec![travel.raw(); self.key_count as usize];
         self.set_magnetism_u16(mag_cmd::BOTTOM_DEADZONE, &values)
     }
 
-    /// Set top deadzone for all keys (u16 raw value)
-    ///
-    /// Top deadzone is the distance from top of travel that is ignored.
-    pub fn set_top_deadzone_all_u16(&self, travel: u16) -> Result<(), KeyboardError> {
-        let values = vec![travel; self.key_count as usize];
+    /// Set the top deadzone for all keys — the distance from the top of travel
+    /// that is ignored.
+    pub fn set_top_deadzone_all(&self, travel: TravelDepth) -> Result<(), KeyboardError> {
+        let values = vec![travel.raw(); self.key_count as usize];
         self.set_magnetism_u16(mag_cmd::TOP_DEADZONE, &values)
     }
 
