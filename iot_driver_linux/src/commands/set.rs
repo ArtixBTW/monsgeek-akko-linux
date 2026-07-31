@@ -3,10 +3,11 @@
 use super::CommandResult;
 use iot_driver::protocol::{cmd, polling_rate};
 use monsgeek_keyboard::{KeyboardInterface, PollingRate, SleepTimeSettings};
+use monsgeek_transport::protocol::Profile;
 use std::io::{self, Write};
 
 /// Set active profile
-pub fn set_profile(keyboard: &KeyboardInterface, profile: u8) -> CommandResult {
+pub fn set_profile(keyboard: &KeyboardInterface, profile: Profile) -> CommandResult {
     match keyboard.set_profile(profile) {
         Ok(_) => println!("Profile set to {profile}"),
         Err(e) => eprintln!("Failed to set profile: {e}"),

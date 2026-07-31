@@ -11,6 +11,7 @@ use crate::keymap::KeyRow;
 use crate::TriggerSettings;
 use monsgeek_keyboard::TravelDepth;
 use monsgeek_keyboard::{KeyboardOptions as KbOptions, LedParams, Precision, SleepTimeSettings};
+use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::TransportType;
 
 #[cfg(feature = "notify")]
@@ -217,9 +218,6 @@ pub(crate) const SPEED_SPINNER: SpinnerConfig = SpinnerConfig::integer(0, 4, 1, 
 /// Spinner config for debounce (0-25, step 1, coarse 5)
 pub(crate) const DEBOUNCE_SPINNER: SpinnerConfig = SpinnerConfig::integer(0, 25, 1, 5, "");
 
-/// Spinner config for profile (0-3)
-pub(crate) const PROFILE_SPINNER: SpinnerConfig = SpinnerConfig::integer(0, 3, 1, 1, "");
-
 /// Spinner config for Fn layer (0-3)
 pub(crate) const FN_LAYER_SPINNER: SpinnerConfig = SpinnerConfig::integer(0, 3, 1, 1, "");
 
@@ -267,7 +265,7 @@ pub(crate) struct LoadingStates {
 pub(crate) enum AsyncResult {
     // Device info results
     DeviceIdAndVersion(Result<(u32, monsgeek_keyboard::FirmwareVersion), String>),
-    Profile(Result<u8, String>),
+    Profile(Result<Profile, String>),
     Debounce(Result<u8, String>),
     PollingRate(Result<u16, String>),
     LedParams(Result<LedParams, String>),

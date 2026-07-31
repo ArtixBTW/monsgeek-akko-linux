@@ -49,7 +49,7 @@ impl PatchInfo {
 /// Status of a single animation definition slot.
 #[derive(Debug, Clone)]
 pub struct AnimDefStatus {
-    pub id: u8,
+    pub id: DefId,
     pub num_kf: u8,
     pub flags: u8,
     pub priority: i8,
@@ -85,7 +85,8 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use monsgeek_transport::protocol::{
-    cmd, magnetism as mag_cmd, CommandTable, KeymatrixLayer, Layer, LedPos, StripIdx,
+    cmd, magnetism as mag_cmd, CommandTable, DefId, KeymatrixLayer, Layer, LedPos, MacroSlot,
+    Profile, StripIdx,
 };
 use monsgeek_transport::{ChecksumType, FlowControlTransport, Transport};
 // Typed commands
@@ -194,13 +195,13 @@ impl KeyboardInterface {
     ///
     /// Does not switch the keyboard — see [`set_profile`](Self::set_profile) for that.
     /// This selects which profile's stored keymap is read and written.
-    pub fn set_active_profile(&self, profile: u8) {
-        self.active_profile.store(profile, Ordering::Relaxed);
+    pub fn set_active_profile(&self, profile: Profile) {
+        self.active_profile.store(profile.get(), Ordering::Relaxed);
     }
 
     /// Profile that keymatrix and Fn operations target.
-    pub fn active_profile(&self) -> u8 {
-        self.active_profile.load(Ordering::Relaxed)
+    pub fn active_profile(&self) -> Profile {
+        Profile::try_from(self.active_profile.load(Ordering::Relaxed)).unwrap_or_default()
     }
 
     /// Set matrix key names from a device profile.
@@ -384,8 +385,8 @@ impl KeyboardInterface {
 
     // === Settings ===
 
-    /// Get current profile (0-3)
-    pub fn get_profile(&self) -> Result<u8, KeyboardError> {
+    /// Get the profile the keyboard is currently switched to.
+    pub fn get_profile(&self) -> Result<Profile, KeyboardError> {
         let cmd = self.commands.get_profile;
         let resp = self.transport.query_command(cmd, &[], ChecksumType::Bit7)?;
         if resp.is_empty() || resp[0] != cmd {
@@ -393,18 +394,16 @@ impl KeyboardInterface {
                 "Invalid profile response".into(),
             ));
         }
-        Ok(resp[1])
+        Profile::try_from(resp[1]).map_err(KeyboardError::InvalidParameter)
     }
 
-    /// Set current profile (0-3)
-    pub fn set_profile(&self, profile: u8) -> Result<(), KeyboardError> {
-        if profile > 3 {
-            return Err(KeyboardError::InvalidParameter(
-                "Profile must be 0-3".into(),
-            ));
-        }
-        self.transport
-            .send_command(self.commands.set_profile, &[profile], ChecksumType::Bit7)?;
+    /// Switch the keyboard to a profile.
+    pub fn set_profile(&self, profile: Profile) -> Result<(), KeyboardError> {
+        self.transport.send_command(
+            self.commands.set_profile,
+            &[profile.get()],
+            ChecksumType::Bit7,
+        )?;
         Ok(())
     }
 
@@ -1046,7 +1045,7 @@ impl KeyboardInterface {
     /// vendor webapp). `profile` is the keyboard profile (usually 0).
     pub fn get_key_config_at_layer(
         &self,
-        profile: u8,
+        profile: Profile,
         layer: KeymatrixLayer,
         key_index: u8,
     ) -> Result<[u8; 4], KeyboardError> {
@@ -1114,13 +1113,13 @@ impl KeyboardInterface {
     /// pipeline, so it settles before returning.
     pub fn set_keymatrix_config(
         &self,
-        profile: u8,
+        profile: Profile,
         key_index: u8,
         layer: KeymatrixLayer,
         config: [u8; 4],
         commit: bool,
     ) -> Result<(), KeyboardError> {
-        let pkt = SetKeyMatrixData::new(profile, key_index, layer.get(), commit, config)?;
+        let pkt = SetKeyMatrixData::new(profile.get(), key_index, layer.get(), commit, config)?;
         if commit {
             self.transport.send_command_with_delay(
                 self.commands.set_keymatrix,
@@ -1533,7 +1532,7 @@ impl KeyboardInterface {
     /// Raw key matrix data (4 bytes per key: `[config_type, b1, b2, b3]`)
     pub fn get_keymatrix(
         &self,
-        profile: u8,
+        profile: Profile,
         layer: KeymatrixLayer,
         num_pages: usize,
     ) -> Result<Vec<u8>, KeyboardError> {
@@ -1541,7 +1540,7 @@ impl KeyboardInterface {
 
         for page in 0..num_pages {
             let query = GetKeyMatrixData {
-                profile,
+                profile: profile.get(),
                 magic: 0xFF,
                 page: page as u8,
                 layer: layer.get(),
@@ -1580,7 +1579,7 @@ impl KeyboardInterface {
     /// * `num_pages` - Number of pages to read (8 for full matrix)
     pub fn get_fn_keymatrix(
         &self,
-        profile: u8,
+        profile: Profile,
         sys: u8,
         num_pages: usize,
     ) -> Result<Vec<u8>, KeyboardError> {
@@ -1589,7 +1588,7 @@ impl KeyboardInterface {
         for page in 0..num_pages {
             let query = GetFnData {
                 sys,
-                profile,
+                profile: profile.get(),
                 magic: 0xFF,
                 page: page as u8,
             };
@@ -1619,12 +1618,12 @@ impl KeyboardInterface {
     /// is transparent fall-through rather than silence.
     pub fn set_fn_config(
         &self,
-        profile: u8,
+        profile: Profile,
         key_index: u8,
         config: [u8; 4],
     ) -> Result<(), KeyboardError> {
         self.transport
-            .send(&SetFnData::new(0, profile, key_index, config)?)?;
+            .send(&SetFnData::new(0, profile.get(), key_index, config)?)?;
         Ok(())
     }
 
@@ -1634,14 +1633,14 @@ impl KeyboardInterface {
     /// or [`set_fn_config`](Self::set_fn_config).
     pub fn set_keymatrix(
         &self,
-        profile: u8,
+        profile: Profile,
         key_index: u8,
         hid_code: u8,
         enabled: bool,
         layer: KeymatrixLayer,
     ) -> Result<(), KeyboardError> {
         let pkt = SetKeyMatrixData::new(
-            profile,
+            profile.get(),
             key_index,
             layer.get(),
             enabled,
@@ -1680,7 +1679,7 @@ impl KeyboardInterface {
     /// Swap two keys
     pub fn swap_keys(
         &self,
-        profile: u8,
+        profile: Profile,
         key_a: u8,
         code_a: u8,
         key_b: u8,
@@ -1701,11 +1700,14 @@ impl KeyboardInterface {
     ///
     /// # Returns
     /// Raw macro data: [2-byte repeat count (LE), then 2-byte events (keycode, flags)]
-    pub fn get_macro(&self, macro_index: u8) -> Result<Vec<u8>, KeyboardError> {
+    pub fn get_macro(&self, macro_index: MacroSlot) -> Result<Vec<u8>, KeyboardError> {
         let mut all_data = Vec::new();
 
         for page in 0..4u8 {
-            let query = GetMacroData { macro_index, page };
+            let query = GetMacroData {
+                macro_index: macro_index.get(),
+                page,
+            };
 
             match self
                 .transport
@@ -1753,7 +1755,7 @@ impl KeyboardInterface {
     /// - Long delay (128+ms): 4 bytes `[keycode, direction_bit, delay_lo, delay_hi]`
     pub fn set_macro(
         &self,
-        macro_index: u8,
+        macro_index: MacroSlot,
         events: &[(u8, bool, u16)],
         repeat_count: u16,
     ) -> Result<(), KeyboardError> {
@@ -1803,7 +1805,8 @@ impl KeyboardInterface {
             let chunk = &macro_data[start..end];
             let is_last = page == num_pages - 1;
 
-            let macro_cmd = SetMacroCommand::new(macro_index, page as u8, is_last, chunk.to_vec())?;
+            let macro_cmd =
+                SetMacroCommand::new(macro_index.get(), page as u8, is_last, chunk.to_vec())?;
 
             self.transport.send_command_with_delay(
                 self.commands.set_macro,
@@ -1825,7 +1828,7 @@ impl KeyboardInterface {
     /// * `repeat` - How many times to repeat
     pub fn set_text_macro(
         &self,
-        macro_index: u8,
+        macro_index: MacroSlot,
         text: &str,
         delay_ms: u16,
         repeat: u16,
@@ -1859,10 +1862,10 @@ impl KeyboardInterface {
         &self,
         layer: Layer,
         key_index: u8,
-        macro_index: u8,
+        macro_index: MacroSlot,
         macro_type: u8,
     ) -> Result<(), KeyboardError> {
-        let config = [9, macro_type, macro_index, 0];
+        let config = [9, macro_type, macro_index.get(), 0];
         match layer.keymatrix_layer() {
             Some(km) => {
                 self.set_keymatrix_config(self.active_profile(), key_index, km, config, true)
@@ -1988,7 +1991,7 @@ impl KeyboardInterface {
     /// If more than 4 keyframes, sends a DEF_EXT packet automatically.
     pub fn anim_define(
         &self,
-        def_id: u8,
+        def_id: DefId,
         flags: u8,
         priority: i8,
         duration_ticks: u16,
@@ -2030,7 +2033,7 @@ impl KeyboardInterface {
     /// [`Self::anim_query_keys`] reads back the *strip* space; the firmware
     /// converts, so the two are deliberately not the same type.
     /// Chunked automatically for packets > 29 entries.
-    pub fn anim_assign(&self, def_id: u8, keys: &[(LedPos, u8)]) -> Result<(), KeyboardError> {
+    pub fn anim_assign(&self, def_id: DefId, keys: &[(LedPos, u8)]) -> Result<(), KeyboardError> {
         use monsgeek_transport::command::AnimAssign;
         for chunk in keys.chunks(29) {
             self.transport.query_command(
@@ -2047,7 +2050,7 @@ impl KeyboardInterface {
     }
 
     /// Cancel a specific animation definition and release its keys.
-    pub fn anim_cancel(&self, def_id: u8) -> Result<(), KeyboardError> {
+    pub fn anim_cancel(&self, def_id: DefId) -> Result<(), KeyboardError> {
         self.transport.query_command(
             cmd::ANIM_CMD,
             &monsgeek_transport::command::AnimCancel { def_id }.to_data(),
@@ -2079,16 +2082,20 @@ impl KeyboardInterface {
                 active_count: r.active_count,
                 frame_count: r.frame_count,
                 overlay_active: r.overlay_active,
+                // A slot id outside 0-7 is firmware the driver does not
+                // understand; drop the entry rather than address a wrong slot.
                 defs: r
                     .defs
                     .into_iter()
-                    .map(|d| AnimDefStatus {
-                        id: d.id,
-                        num_kf: d.num_kf,
-                        flags: d.flags,
-                        priority: d.priority,
-                        key_count: d.key_count,
-                        duration_ticks: d.duration_ticks,
+                    .filter_map(|d| {
+                        Some(AnimDefStatus {
+                            id: DefId::try_from(d.id).ok()?,
+                            num_kf: d.num_kf,
+                            flags: d.flags,
+                            priority: d.priority,
+                            key_count: d.key_count,
+                            duration_ticks: d.duration_ticks,
+                        })
                     })
                     .collect(),
             })),
@@ -2104,7 +2111,7 @@ impl KeyboardInterface {
     /// Note the asymmetry with [`Self::anim_assign`], which takes [`LedPos`]:
     /// the firmware stores its key table in strip order. Round-tripping needs a
     /// deliberate conversion through the firmware's `static_led_pos_tbl`.
-    pub fn anim_query_keys(&self, def_id: u8) -> Result<Vec<(StripIdx, u8)>, KeyboardError> {
+    pub fn anim_query_keys(&self, def_id: DefId) -> Result<Vec<(StripIdx, u8)>, KeyboardError> {
         use monsgeek_transport::command::{AnimQueryKeys, AnimQueryKeysResponse};
         match self
             .transport

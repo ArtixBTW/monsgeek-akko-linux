@@ -482,6 +482,170 @@ pub mod matrix {
 // Layer
 // ---------------------------------------------------------------------------
 
+/// A keyboard profile, 0–3.
+///
+/// The board's whole configuration is per-profile — keymaps, magnetism tables,
+/// LED settings — so a command sent against the wrong profile writes real
+/// settings somewhere the user is not looking.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct Profile(u8);
+
+impl Profile {
+    pub const COUNT: u8 = 4;
+    /// Every profile, in order.
+    pub const ALL: [Self; 4] = [Self(0), Self(1), Self(2), Self(3)];
+
+    /// Zero-based wire value.
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// One-based number, as the keyboard's own UI and labels count profiles.
+    /// The wire value is zero-based, so this is where the off-by-one lives.
+    pub const fn number(self) -> u8 {
+        self.0 + 1
+    }
+}
+
+impl TryFrom<u8> for Profile {
+    type Error = String;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        if v < Self::COUNT {
+            Ok(Self(v))
+        } else {
+            Err(format!("profile must be 0-{}, got {v}", Self::COUNT - 1))
+        }
+    }
+}
+
+impl From<Profile> for u8 {
+    fn from(p: Profile) -> Self {
+        p.0
+    }
+}
+
+impl fmt::Display for Profile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for Profile {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<u8>()
+            .map_err(|_| format!("invalid profile: {s:?}"))
+            .and_then(Self::try_from)
+    }
+}
+
+/// A macro storage slot, 0–49.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct MacroSlot(u8);
+
+impl MacroSlot {
+    pub const COUNT: u8 = 50;
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl TryFrom<u8> for MacroSlot {
+    type Error = String;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        if v < Self::COUNT {
+            Ok(Self(v))
+        } else {
+            Err(format!("macro slot must be 0-{}, got {v}", Self::COUNT - 1))
+        }
+    }
+}
+
+impl From<MacroSlot> for u8 {
+    fn from(m: MacroSlot) -> Self {
+        m.0
+    }
+}
+
+impl fmt::Display for MacroSlot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for MacroSlot {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<u8>()
+            .map_err(|_| format!("invalid macro slot: {s:?}"))
+            .and_then(Self::try_from)
+    }
+}
+
+/// An animation definition slot, 0–7.
+///
+/// The wire format packs the slot into the low three bits of a sub-command byte.
+/// Masking an out-of-range id there would silently retarget the write — slot 8
+/// would land on slot 0 — so the range is checked here instead.
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct DefId(u8);
+
+impl DefId {
+    pub const COUNT: u8 = 8;
+    /// Every slot, in order.
+    pub const ALL: [Self; 8] = [
+        Self(0),
+        Self(1),
+        Self(2),
+        Self(3),
+        Self(4),
+        Self(5),
+        Self(6),
+        Self(7),
+    ];
+    /// The highest slot.
+    pub const LAST: Self = Self(Self::COUNT - 1);
+
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl TryFrom<u8> for DefId {
+    type Error = String;
+
+    fn try_from(v: u8) -> Result<Self, Self::Error> {
+        if v < Self::COUNT {
+            Ok(Self(v))
+        } else {
+            Err(format!(
+                "animation slot must be 0-{}, got {v}",
+                Self::COUNT - 1
+            ))
+        }
+    }
+}
+
+impl From<DefId> for u8 {
+    fn from(d: DefId) -> Self {
+        d.0
+    }
+}
+
+impl fmt::Display for DefId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// A keymatrix sub-layer, 0–3 — the wire-level address of one of a key's four
 /// config slots.
 ///
@@ -1149,5 +1313,89 @@ mod layer_tests {
                 Ok(layer)
             );
         }
+    }
+}
+
+/// Every bounds-checked index rejects out-of-range input rather than wrapping,
+/// saturating, or masking. `DefId` in particular used to reach the wire as
+/// `id & 0x07`, so slot 8 silently retargeted slot 0.
+#[cfg(test)]
+mod bounded_index_tests {
+    use super::{DefId, KeymatrixLayer, Layer, MacroSlot, Profile};
+
+    /// `(type name, count, round-trips, rejects)` for each bounded index.
+    macro_rules! check_bounds {
+        ($ty:ty, $count:expr) => {{
+            for v in 0..$count {
+                assert_eq!(
+                    <$ty>::try_from(v).map(|x| x.get()),
+                    Ok(v),
+                    "{}: {v} should be in range",
+                    stringify!($ty)
+                );
+            }
+            for v in $count..=u8::MAX {
+                assert!(
+                    <$ty>::try_from(v).is_err(),
+                    "{}: {v} should be rejected, not wrapped",
+                    stringify!($ty)
+                );
+            }
+        }};
+    }
+
+    #[test]
+    fn bounded_indexes_reject_out_of_range() {
+        check_bounds!(Profile, Profile::COUNT);
+        check_bounds!(DefId, DefId::COUNT);
+        check_bounds!(MacroSlot, MacroSlot::COUNT);
+        check_bounds!(KeymatrixLayer, KeymatrixLayer::COUNT);
+        // `Layer` is an enum, so it has no `get`; check it the same way by hand.
+        for v in 0..3u8 {
+            assert!(Layer::try_from(v).is_ok(), "layer {v} should be in range");
+        }
+        for v in 3..=u8::MAX {
+            assert!(Layer::try_from(v).is_err(), "layer {v} should be rejected");
+        }
+    }
+
+    /// The `ALL` tables list exactly the in-range values, in order — the loops
+    /// that iterate slots depend on it.
+    #[test]
+    fn all_tables_cover_the_whole_range() {
+        assert_eq!(Profile::ALL.len(), Profile::COUNT as usize);
+        assert_eq!(DefId::ALL.len(), DefId::COUNT as usize);
+        assert_eq!(KeymatrixLayer::ALL.len(), KeymatrixLayer::COUNT as usize);
+        for (i, p) in Profile::ALL.iter().enumerate() {
+            assert_eq!(p.get(), i as u8);
+            // Profiles are shown one-based; the wire value is zero-based.
+            assert_eq!(p.number(), i as u8 + 1);
+        }
+        for (i, d) in DefId::ALL.iter().enumerate() {
+            assert_eq!(d.get(), i as u8);
+        }
+        assert_eq!(DefId::LAST, DefId::ALL[DefId::ALL.len() - 1]);
+    }
+
+    /// A slot typed by a user must be reported, not silently redirected —
+    /// `parse().unwrap_or(0)` used to send a typo to macro slot 0.
+    #[test]
+    fn parsing_a_bad_slot_is_an_error_not_slot_zero() {
+        for bad in ["", "abc", "-1", "50", "999", " 1"] {
+            assert!(
+                bad.parse::<MacroSlot>().is_err(),
+                "macro slot {bad:?} should not parse"
+            );
+        }
+        assert_eq!("0".parse::<MacroSlot>().map(|m| m.get()), Ok(0));
+        assert_eq!("49".parse::<MacroSlot>().map(|m| m.get()), Ok(49));
+
+        for bad in ["", "x", "4", "-1"] {
+            assert!(
+                bad.parse::<Profile>().is_err(),
+                "profile {bad:?} should not parse"
+            );
+        }
+        assert_eq!("3".parse::<Profile>().map(|p| p.get()), Ok(3));
     }
 }

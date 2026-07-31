@@ -1,7 +1,7 @@
 // CLI definitions using clap
 
 use clap::{Parser, Subcommand, ValueEnum};
-use monsgeek_transport::protocol::Layer;
+use monsgeek_transport::protocol::{Layer, Profile};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -43,9 +43,8 @@ pub struct Cli {
     /// carry no profile byte, so those commands briefly switch the keyboard to the
     /// requested profile, apply, and switch back — announced when it happens.
     /// Use `set-profile` to change which profile the keyboard runs.
-    #[arg(short = 'P', long, global = true, value_name = "N",
-          value_parser = clap::value_parser!(u8).range(0..4))]
-    pub profile: Option<u8>,
+    #[arg(short = 'P', long, global = true, value_name = "N")]
+    pub profile: Option<Profile>,
 
     #[command(subcommand)]
     pub command: Option<Commands>,
@@ -112,8 +111,7 @@ pub enum Commands {
     #[command(visible_alias = "sp")]
     SetProfile {
         /// Profile number (0-3)
-        #[arg(value_parser = clap::value_parser!(u8).range(0..4))]
-        profile: u8,
+        profile: Profile,
     },
 
     /// Set debounce time
@@ -366,7 +364,7 @@ pub enum Commands {
         key2: String,
         /// Profile to swap within (0-3). Swap only ever touches keymatrix layer 0.
         #[arg(short, long, default_value = "0")]
-        profile: u8,
+        profile: Profile,
     },
 
     /// Show per-key bindings across layers (customised keys only by default)

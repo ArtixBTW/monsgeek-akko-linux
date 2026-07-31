@@ -1,6 +1,8 @@
 // MonsGeek/Akko HID Communication
 // Shared types for device communication
 
+use monsgeek_transport::protocol::Profile;
+
 /// Vendor event types from HID input reports
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VendorEventType {
@@ -139,7 +141,7 @@ pub struct TriggerSettings {
 pub struct FirmwareSettings {
     pub device_id: u32,
     pub version: u16,
-    pub profile: u8,
+    pub profile: Profile,
     pub debounce: u8,
     pub polling_rate: u16,
     pub led_mode: u8,

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use monsgeek_keyboard::{KeyTriggerSettings, KeyboardInterface, PollingRate, Precision};
+use monsgeek_transport::protocol::{DefId, MacroSlot};
 use monsgeek_transport::{ChecksumType, FlowControlTransport, HidDiscovery, Transport};
 
 /// Open the preferred keyboard and create a KeyboardInterface.
@@ -135,7 +136,6 @@ async fn tui_first_tab_queries_resolve() {
     // Sanity checks — values should be in plausible ranges
     assert!(device_id > 0, "device_id should be non-zero");
     assert!(version.raw > 0, "firmware version raw should be non-zero");
-    assert!(profile <= 3, "profile should be 0-3, got {profile}");
     assert!(debounce <= 50, "debounce should be 0-50ms, got {debounce}");
     assert!(
         matches!(
@@ -277,7 +277,8 @@ fn macro_read_existing() {
     let (_raw, kb) = open_keyboard();
 
     eprintln!("--- Reading existing macro from slot 0 ---");
-    for slot in 0..8u8 {
+    for i in 0..8u8 {
+        let slot = MacroSlot::try_from(i).expect("slots 0-7 exist");
         eprint!("Slot {slot}: ");
         match kb.get_macro(slot) {
             Ok(data) => {
@@ -486,7 +487,7 @@ fn assigned_grid_cells_survive_the_strip_round_trip() {
     // Four adjacent QWERTY-row cells — contiguous in the grid, but not on the strip.
     let expected: BTreeSet<LedPos> = [34, 35, 36, 37].into_iter().map(LedPos::new).collect();
 
-    let def_id = 6;
+    let def_id = DefId::try_from(6).expect("slot 6 exists");
     // The firmware drops assignments to a def with no keyframes, so define first:
     // one keyframe, solid, looping.
     kb.anim_define(def_id, 0x01, 0, 100, &[(0, 0x00FF, 0)])

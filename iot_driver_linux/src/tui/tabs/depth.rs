@@ -6,6 +6,7 @@ use ratatui::{prelude::*, widgets::*};
 use std::time::{Duration, Instant};
 
 use monsgeek_keyboard::{led::speed_from_wire, VendorEvent};
+use monsgeek_transport::protocol::Profile;
 
 use super::super::shared::{DepthViewMode, DEPTH_HISTORY_LEN};
 use super::super::App;
@@ -378,7 +379,11 @@ impl App {
                 self.status_msg = "Keyboard deep sleep".to_string();
             }
             VendorEvent::ProfileChange { profile } => {
-                self.info.profile = profile;
+                // A profile the driver does not know about should not silently
+                // become profile 0 in the UI.
+                if let Ok(p) = Profile::try_from(profile) {
+                    self.info.profile = p;
+                }
                 self.status_msg = format!("Profile {} (via Fn key)", profile + 1);
             }
             VendorEvent::LedEffectMode { effect_id } => {

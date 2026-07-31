@@ -193,9 +193,13 @@ pub(in crate::tui) fn handle_notify_input(app: &mut App, key: KeyCode) {
                 if ns.preview_on_hardware {
                     ns.preview_on_hardware = false;
                     if let Some(ref kb) = app.keyboard {
-                        let _ = kb.anim_cancel(7);
+                        let _ = kb.anim_cancel(crate::anim::PREVIEW_SLOT);
                     }
-                    app.notify.slot_info.lock().unwrap().clear(7);
+                    app.notify
+                        .slot_info
+                        .lock()
+                        .unwrap()
+                        .clear(crate::anim::PREVIEW_SLOT);
                     app.status_msg = "Preview stopped".to_string();
                 } else {
                     app.notify_recompute_preview();
@@ -659,11 +663,11 @@ impl App {
         };
 
         // Cancel previous preview
-        let _ = kb.anim_cancel(7);
+        let _ = kb.anim_cancel(crate::anim::PREVIEW_SLOT);
 
         // Program slot 7 with max priority so it wins over daemon animations
         if let Err(e) = kb.anim_define(
-            7,
+            crate::anim::PREVIEW_SLOT,
             compiled.flags,
             compiled.priority,
             compiled.duration_ticks,
@@ -675,7 +679,7 @@ impl App {
 
         // Assign QWERTY row (LED grid cells 33-44), no phase offset
         let keys: Vec<(LedPos, u8)> = (33..=44).map(|i| (LedPos::new(i), 0)).collect();
-        if let Err(e) = kb.anim_assign(7, &keys) {
+        if let Err(e) = kb.anim_assign(crate::anim::PREVIEW_SLOT, &keys) {
             self.status_msg = format!("Preview assign failed: {e}");
             return;
         }
@@ -689,7 +693,7 @@ impl App {
             .unwrap_or_default();
         if let Some(ref resolved) = self.notify.resolved {
             self.notify.slot_info.lock().unwrap().set(
-                7,
+                crate::anim::PREVIEW_SLOT,
                 crate::anim::SlotEntry {
                     effect_name,
                     resolved: resolved.clone(),

@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use monsgeek_keyboard::{AnimDefStatus, AnimStatus, KeyboardInterface};
-use monsgeek_transport::protocol::{LedPos, StripIdx};
+use monsgeek_transport::protocol::{DefId, LedPos, StripIdx};
 
 use crate::effect::{self, CompiledAnim, ResolvedEffect};
 
@@ -35,26 +35,28 @@ pub struct SlotInfo {
 }
 
 impl SlotInfo {
-    pub fn set(&mut self, def_id: u8, entry: SlotEntry) {
-        if (def_id as usize) < 8 {
-            self.slots[def_id as usize] = Some(entry);
-        }
+    pub fn set(&mut self, def_id: DefId, entry: SlotEntry) {
+        self.slots[usize::from(def_id.get())] = Some(entry);
     }
 
-    pub fn clear(&mut self, def_id: u8) {
-        if (def_id as usize) < 8 {
-            self.slots[def_id as usize] = None;
-        }
+    pub fn clear(&mut self, def_id: DefId) {
+        self.slots[usize::from(def_id.get())] = None;
     }
 
     pub fn clear_all(&mut self) {
         self.slots = Default::default();
     }
 
-    pub fn get(&self, def_id: u8) -> Option<&SlotEntry> {
-        self.slots.get(def_id as usize).and_then(|o| o.as_ref())
+    pub fn get(&self, def_id: DefId) -> Option<&SlotEntry> {
+        self.slots[usize::from(def_id.get())].as_ref()
     }
 }
+
+/// The slot reserved for one-off previews — the TUI's on-device effect preview
+/// and the daemon's start-up sweep. It is the top slot so that the daemon's
+/// allocator, which fills from 0, reaches it last and a preview is the first
+/// thing evicted rather than a live notification.
+pub const PREVIEW_SLOT: DefId = DefId::LAST;
 
 /// Thread-safe shared slot info.
 pub type SharedSlotInfo = Arc<std::sync::Mutex<SlotInfo>>;
@@ -83,7 +85,7 @@ pub struct KeyAssignment {
 pub struct EngineSnapshot {
     pub raw: AnimStatus,
     /// Per-def key assignments (def_id → list). Populated by `query_full()`.
-    pub keys: std::collections::HashMap<u8, Vec<KeyAssignment>>,
+    pub keys: std::collections::HashMap<DefId, Vec<KeyAssignment>>,
 }
 
 impl EngineSnapshot {
@@ -147,7 +149,7 @@ impl fmt::Display for EngineSnapshot {
 /// A programmed animation on the device, tracking the slot it occupies.
 #[derive(Debug, Clone)]
 pub struct ProgrammedAnim {
-    pub def_id: u8,
+    pub def_id: DefId,
     pub compiled: CompiledAnim,
     pub key_count: usize,
 }
@@ -219,7 +221,7 @@ impl AnimEngine {
     /// Returns the compiled animation for reference.
     pub fn program(
         &self,
-        def_id: u8,
+        def_id: DefId,
         effect: &ResolvedEffect,
         priority: i8,
         one_shot: bool,
@@ -253,7 +255,7 @@ impl AnimEngine {
     /// Program a pre-compiled animation.
     pub fn program_compiled(
         &self,
-        def_id: u8,
+        def_id: DefId,
         compiled: &CompiledAnim,
         keys: &[(LedPos, u8)],
     ) -> Result<(), String> {
@@ -275,7 +277,7 @@ impl AnimEngine {
     }
 
     /// Cancel a specific animation slot.
-    pub fn cancel(&self, def_id: u8) -> Result<(), String> {
+    pub fn cancel(&self, def_id: DefId) -> Result<(), String> {
         self.kb
             .anim_cancel(def_id)
             .map_err(|e| format!("anim_cancel: {e}"))

@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::protocol::{self, cmd};
+use crate::protocol::{self, cmd, DefId};
 use crate::types::ChecksumType;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -2296,7 +2296,7 @@ fn parse_led_params_command(data: &[u8]) -> Option<LedParamsResponse> {
 /// Keyframes are (t_ticks_le16, color_rgb565_le16, easing_u8) — 5 bytes each.
 #[derive(Debug, Clone)]
 pub struct AnimDefine {
-    pub def_id: u8,
+    pub def_id: DefId,
     pub num_kf: u8,
     pub flags: u8,
     pub priority: i8,
@@ -2311,7 +2311,8 @@ impl HidCommand for AnimDefine {
 
     fn to_data(&self) -> Vec<u8> {
         let mut data = vec![0u8; 26];
-        data[0] = 0x08 | (self.def_id & 0x07);
+        // `DefId` is 0-7, so the sub-command's low three bits hold it exactly.
+        data[0] = 0x08 | self.def_id.get();
         data[1] = self.num_kf;
         data[2] = self.flags;
         data[3] = self.priority as u8;
@@ -2330,7 +2331,7 @@ impl HidCommand for AnimDefine {
 /// Continuation keyframes 4-7 (0xEA sub 0x10-0x17).
 #[derive(Debug, Clone)]
 pub struct AnimDefineExt {
-    pub def_id: u8,
+    pub def_id: DefId,
     pub keyframes: Vec<(u16, u16, u8)>, // KFs 4-7
 }
 
@@ -2340,7 +2341,7 @@ impl HidCommand for AnimDefineExt {
 
     fn to_data(&self) -> Vec<u8> {
         let mut data = vec![0u8; 21];
-        data[0] = 0x10 | (self.def_id & 0x07);
+        data[0] = 0x10 | self.def_id.get();
         for (i, &(t, c565, easing)) in self.keyframes.iter().enumerate().take(4) {
             let off = 1 + i * 5;
             data[off..off + 2].copy_from_slice(&t.to_le_bytes());
@@ -2354,8 +2355,8 @@ impl HidCommand for AnimDefineExt {
 /// Assign keys to an animation definition (0xEA sub 0x00-0x07).
 #[derive(Debug, Clone)]
 pub struct AnimAssign {
-    pub def_id: u8,
-    /// (matrix_idx, phase_offset) pairs, max 29.
+    pub def_id: DefId,
+    /// (LedPos, phase_offset) pairs, max 29.
     pub keys: Vec<(u8, u8)>,
 }
 
@@ -2366,7 +2367,7 @@ impl HidCommand for AnimAssign {
     fn to_data(&self) -> Vec<u8> {
         let count = self.keys.len().min(29);
         let mut data = vec![0u8; 2 + count * 2];
-        data[0] = self.def_id & 0x07;
+        data[0] = self.def_id.get();
         data[1] = count as u8;
         for (i, &(idx, phase)) in self.keys.iter().enumerate().take(count) {
             data[2 + i * 2] = idx;
@@ -2379,7 +2380,7 @@ impl HidCommand for AnimAssign {
 /// Cancel a specific animation definition (0xEA sub 0xFE).
 #[derive(Debug, Clone)]
 pub struct AnimCancel {
-    pub def_id: u8,
+    pub def_id: DefId,
 }
 
 impl HidCommand for AnimCancel {
@@ -2387,7 +2388,7 @@ impl HidCommand for AnimCancel {
     const CHECKSUM: ChecksumType = ChecksumType::None;
 
     fn to_data(&self) -> Vec<u8> {
-        vec![0xFE, self.def_id]
+        vec![0xFE, self.def_id.get()]
     }
 }
 
@@ -2483,7 +2484,7 @@ impl HidResponse for AnimQueryResponse {
 /// Query key assignments for one def (0xEA sub 0xF1-0xF8).
 #[derive(Debug, Clone)]
 pub struct AnimQueryKeys {
-    pub def_id: u8,
+    pub def_id: DefId,
 }
 
 impl HidCommand for AnimQueryKeys {
@@ -2491,7 +2492,7 @@ impl HidCommand for AnimQueryKeys {
     const CHECKSUM: ChecksumType = ChecksumType::None;
 
     fn to_data(&self) -> Vec<u8> {
-        vec![0xF1 + (self.def_id & 0x07)]
+        vec![0xF1 + self.def_id.get()]
     }
 }
 

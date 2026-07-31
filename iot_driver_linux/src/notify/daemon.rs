@@ -15,7 +15,7 @@ use super::state::{self, NotificationStore};
 use crate::anim::{self, AnimEngine, SharedSlotInfo, SlotEntry};
 use crate::effect::EffectLibrary;
 use monsgeek_keyboard::VendorEvent;
-use monsgeek_transport::protocol::{led_grid, LedPos};
+use monsgeek_transport::protocol::{led_grid, DefId, LedPos};
 
 /// Run the notification daemon (blocking, standalone CLI entry point).
 ///
@@ -43,26 +43,26 @@ impl AnimSlotManager {
         Self { slots: [None; 8] }
     }
 
-    /// Allocate a slot, returning its index, or `None` if all 8 slots are in use.
-    fn allocate(&mut self, notif_id: u64) -> Option<u8> {
-        for (i, slot) in self.slots.iter_mut().enumerate() {
-            if slot.is_none() {
-                *slot = Some(notif_id);
-                return Some(i as u8);
-            }
-        }
-        None
+    /// Allocate a slot, or `None` if all 8 are in use.
+    fn allocate(&mut self, notif_id: u64) -> Option<DefId> {
+        let (i, slot) = self
+            .slots
+            .iter_mut()
+            .enumerate()
+            .find(|(_, s)| s.is_none())?;
+        *slot = Some(notif_id);
+        DefId::try_from(i as u8).ok()
     }
 
     /// Free a slot by notification ID.
-    fn free_by_notif(&mut self, notif_id: u64) -> Option<u8> {
-        for (i, slot) in self.slots.iter_mut().enumerate() {
-            if *slot == Some(notif_id) {
-                *slot = None;
-                return Some(i as u8);
-            }
-        }
-        None
+    fn free_by_notif(&mut self, notif_id: u64) -> Option<DefId> {
+        let (i, slot) = self
+            .slots
+            .iter_mut()
+            .enumerate()
+            .find(|(_, s)| **s == Some(notif_id))?;
+        *slot = None;
+        DefId::try_from(i as u8).ok()
     }
 }
 
@@ -80,7 +80,7 @@ fn startup_animation(engine: &AnimEngine) {
     // Total duration: animation (40 ticks) + max stagger (~20 ticks for diagonal)
     if engine
         .kb()
-        .anim_define(7, fw_flags::ONE_SHOT, -128, 40, &keyframes)
+        .anim_define(anim::PREVIEW_SLOT, fw_flags::ONE_SHOT, -128, 40, &keyframes)
         .is_err()
     {
         return;
@@ -98,13 +98,13 @@ fn startup_animation(engine: &AnimEngine) {
         }
     }
 
-    let _ = engine.kb().anim_assign(7, &keys);
+    let _ = engine.kb().anim_assign(anim::PREVIEW_SLOT, &keys);
 
     // Cancel after animation completes: max_phase(20)*8 + duration(40) = 200 ticks ≈ 2s
     let kb = engine.kb_arc();
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-        let _ = kb.anim_cancel(7);
+        let _ = kb.anim_cancel(anim::PREVIEW_SLOT);
     });
 }
 
@@ -112,7 +112,7 @@ fn startup_animation(engine: &AnimEngine) {
 ///
 /// Returns true on success; false indicates a programming failure (USB/HID error
 /// or firmware rejection) and the caller should drop the notification.
-fn program_notification(engine: &AnimEngine, notif: &state::Notification, def_id: u8) -> bool {
+fn program_notification(engine: &AnimEngine, notif: &state::Notification, def_id: DefId) -> bool {
     let one_shot = notif.ttl.is_some() && notif.resolved.duration_ms > 0.0;
     let priority = notif.priority.clamp(-128, 127) as i8;
 
@@ -262,10 +262,11 @@ pub async fn run_with_cancel(
             if has_active_slots && last_sync.elapsed() >= sync_interval {
                 last_sync = std::time::Instant::now();
                 if let Ok(Some(status)) = engine.kb().anim_query() {
-                    let expected: std::collections::HashSet<u8> = (0..8u8)
-                        .filter(|&s| slots.slots[s as usize].is_some())
+                    let expected: std::collections::HashSet<DefId> = DefId::ALL
+                        .into_iter()
+                        .filter(|s| slots.slots[usize::from(s.get())].is_some())
                         .collect();
-                    let actual: std::collections::HashSet<u8> =
+                    let actual: std::collections::HashSet<DefId> =
                         status.defs.iter().map(|d| d.id).collect();
                     if expected != actual {
                         engine.clear().ok();
@@ -337,7 +338,9 @@ pub async fn run_with_cancel(
             // key starts at the right point in the def's elapsed timeline.
             let existing_slot = {
                 let si = slot_info.lock().unwrap();
-                (0..8u8).find(|&s| si.get(s).is_some_and(|e| e.compiled == compiled))
+                DefId::ALL
+                    .into_iter()
+                    .find(|&s| si.get(s).is_some_and(|e| e.compiled == compiled))
             };
 
             if let Some(def_id) = existing_slot {
@@ -350,7 +353,7 @@ pub async fn run_with_cancel(
                     })
                     .collect();
                 if engine.kb().anim_assign(def_id, &keys).is_ok() {
-                    slots.slots[def_id as usize] = Some(id);
+                    slots.slots[usize::from(def_id.get())] = Some(id);
                     programmed.insert(id);
                     log.push(format!(
                         "join {} → slot {} ({} keys)",
@@ -401,7 +404,9 @@ pub async fn run_with_cancel(
                 // Find the def slot running this animation
                 let def_id = {
                     let si = slot_info.lock().unwrap();
-                    (0..8u8).find(|&s| si.get(s).is_some_and(|e| e.compiled == wave.compiled))
+                    DefId::ALL
+                        .into_iter()
+                        .find(|&s| si.get(s).is_some_and(|e| e.compiled == wave.compiled))
                 };
                 if let Some(def_id) = def_id {
                     let keys: Vec<(LedPos, u8)> = wave

@@ -53,6 +53,7 @@ use monsgeek_keyboard::{
     led::speed_to_wire, KeyboardInterface, Precision, SleepTimeSettings, TimestampedEvent,
     VendorEvent,
 };
+use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::{FlowControlTransport, HidDiscovery, Transport};
 
 /// Resolve `(array_dim, display_count)` for a device.
@@ -408,7 +409,7 @@ impl App {
 
         // Per-profile data is read and written against whichever profile the board
         // is actually running.
-        kb.set_active_profile(kb.get_profile().unwrap_or(0));
+        kb.set_active_profile(kb.get_profile().unwrap_or_default());
 
         // Set non-analog positions from matrix database (encoder/GPIO keys).
         if let Some(matrix) = matrix_db {
@@ -583,7 +584,7 @@ impl App {
                     kb.set_matrix_defaults(m.matrix.clone());
                 }
 
-                kb.set_active_profile(kb.get_profile().unwrap_or(0));
+                kb.set_active_profile(kb.get_profile().unwrap_or_default());
 
                 if let Some(matrix) = matrix_db {
                     if let Some(positions) = &matrix.non_analog_positions {
@@ -1363,7 +1364,7 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                             } else if app.tab == 0 {
                                 let coarse = key.modifiers.contains(KeyModifiers::SHIFT);
                                 match app.info_tags.get(app.selected).copied().unwrap_or(InfoTag::ReadOnly) {
-                                    InfoTag::Profile => app.set_profile(PROFILE_SPINNER.decrement_u8(app.info.profile, coarse)),
+                                    InfoTag::Profile => app.step_profile(-1),
                                     InfoTag::Debounce => app.set_debounce(DEBOUNCE_SPINNER.decrement_u8(app.info.debounce, coarse)),
                                     InfoTag::PollingRate => app.cycle_polling_rate(1), // higher index = lower rate
                                     InfoTag::LedMode => app.set_led_mode(app.info.led_mode.saturating_sub(1)),
@@ -1430,7 +1431,7 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                             } else if app.tab == 0 {
                                 let coarse = key.modifiers.contains(KeyModifiers::SHIFT);
                                 match app.info_tags.get(app.selected).copied().unwrap_or(InfoTag::ReadOnly) {
-                                    InfoTag::Profile => app.set_profile(PROFILE_SPINNER.increment_u8(app.info.profile, coarse)),
+                                    InfoTag::Profile => app.step_profile(1),
                                     InfoTag::Debounce => app.set_debounce(DEBOUNCE_SPINNER.increment_u8(app.info.debounce, coarse)),
                                     InfoTag::PollingRate => app.cycle_polling_rate(-1), // lower index = higher rate
                                     InfoTag::LedMode => app.set_led_mode((app.info.led_mode + 1).min(cmd::LED_MODE_MAX)),
@@ -1577,10 +1578,10 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                             app.cycle_profile();
                         }
-                        KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(0),
-                        KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(1),
-                        KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(2),
-                        KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(3),
+                        KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(Profile::ALL[0]),
+                        KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(Profile::ALL[1]),
+                        KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(Profile::ALL[2]),
+                        KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::CONTROL) => app.set_profile(Profile::ALL[3]),
                         KeyCode::PageUp if app.tab == 2 => {
                             for _ in 0..10 {
                                 app.scroll_state.scroll_up();
@@ -1860,7 +1861,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         "MonsGeek/Akko Keyboard - Configuration Tool".to_string()
     };
     let profile_text = if app.connected {
-        format!(" Profile {}/4  ^P ", app.info.profile + 1)
+        format!(" Profile {}/4  ^P ", app.info.profile.get() + 1)
     } else {
         String::new()
     };
@@ -1938,7 +1939,7 @@ fn ui(f: &mut Frame, app: &mut App) {
         "Disconnected"
     };
     let profile_str = if app.connected {
-        format!(" Profile {}", app.info.profile + 1)
+        format!(" Profile {}", app.info.profile.get() + 1)
     } else {
         String::new()
     };

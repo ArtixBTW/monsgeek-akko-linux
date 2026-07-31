@@ -4,11 +4,17 @@ use super::CommandResult;
 use iot_driver::macro_seq::MacroSeq;
 use iot_driver::protocol::hid;
 use monsgeek_keyboard::{parse_macro_events, KeyboardInterface};
-use monsgeek_transport::protocol::{matrix, HidUsage, Layer, MatrixPos};
+use monsgeek_transport::protocol::{matrix, HidUsage, Layer, MacroSlot, MatrixPos};
 
 /// Get macro for a key
 pub fn get_macro(keyboard: &KeyboardInterface, key: &str) -> CommandResult {
-    let macro_index: u8 = key.parse().unwrap_or(0);
+    let macro_index: MacroSlot = match key.parse() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{e}");
+            return Ok(());
+        }
+    };
     println!("Reading macro {macro_index}...");
     match keyboard.get_macro(macro_index) {
         Ok(data) => {
@@ -70,7 +76,13 @@ pub fn set_macro(
     repeat: u16,
     seq: bool,
 ) -> CommandResult {
-    let macro_index: u8 = key.parse().unwrap_or(0);
+    let macro_index: MacroSlot = match key.parse() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{e}");
+            return Ok(());
+        }
+    };
 
     if seq {
         // Parse as sequence syntax
@@ -112,7 +124,13 @@ pub fn set_macro(
 
 /// Clear macro from a key
 pub fn clear_macro(keyboard: &KeyboardInterface, key: &str) -> CommandResult {
-    let macro_index: u8 = key.parse().unwrap_or(0);
+    let macro_index: MacroSlot = match key.parse() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{e}");
+            return Ok(());
+        }
+    };
 
     println!("Clearing macro {macro_index}...");
 
@@ -130,7 +148,13 @@ pub fn assign_macro(
     macro_index_str: &str,
     fn_layer: bool,
 ) -> CommandResult {
-    let macro_index: u8 = macro_index_str.parse().unwrap_or(0);
+    let macro_index: MacroSlot = match macro_index_str.parse() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("{e}");
+            return Ok(());
+        }
+    };
 
     // Resolve key name to matrix index
     let key_index = if let Ok(idx) = key.parse::<u8>() {

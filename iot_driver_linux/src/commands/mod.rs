@@ -33,6 +33,7 @@ pub mod utility;
 
 use iot_driver::protocol::{self, cmd};
 use monsgeek_keyboard::settings::FirmwareVersion;
+use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::{
     format_device_list, DeviceDiscovery, FlowControlTransport, HidDiscovery, PacketFilter,
     PrinterConfig, Transport,
@@ -51,14 +52,14 @@ pub struct CmdCtx {
     pub printer_config: Option<PrinterConfig>,
     pub device: Option<String>,
     /// `--profile`: operate on this profile instead of the board's active one.
-    pub profile: Option<u8>,
+    pub profile: Option<Profile>,
 }
 
 impl CmdCtx {
     pub fn new(
         printer_config: Option<PrinterConfig>,
         device: Option<String>,
-        profile: Option<u8>,
+        profile: Option<Profile>,
     ) -> Self {
         Self {
             printer_config,
@@ -222,7 +223,10 @@ pub fn open_keyboard(
 
     // Keymatrix and Fn operations target the board's active profile unless the
     // caller overrides it, so a read and the write that follows always agree.
-    let profile = ctx.profile.or_else(|| kb.get_profile().ok()).unwrap_or(0);
+    let profile = ctx
+        .profile
+        .or_else(|| kb.get_profile().ok())
+        .unwrap_or_default();
     kb.set_active_profile(profile);
 
     // Set non-analog positions from matrix database (encoder/GPIO keys).
@@ -239,7 +243,7 @@ pub fn open_keyboard(
 /// Restores the board's profile when dropped, on every exit path.
 struct ProfileGuard<'a> {
     keyboard: &'a monsgeek_keyboard::KeyboardInterface,
-    restore_to: u8,
+    restore_to: Profile,
 }
 
 impl Drop for ProfileGuard<'_> {
@@ -251,13 +255,13 @@ impl Drop for ProfileGuard<'_> {
         match self.keyboard.set_profile(self.restore_to) {
             Ok(()) => {
                 self.keyboard.set_active_profile(self.restore_to);
-                println!("Restored profile {}.", self.restore_to + 1);
+                println!("Restored profile {}.", self.restore_to.number());
             }
             Err(e) => eprintln!(
                 "WARNING: could not restore profile {}: {e}\n\
                  The keyboard is still on another profile — run `iot_driver set-profile {}`.",
-                self.restore_to + 1,
-                self.restore_to
+                self.restore_to.number(),
+                self.restore_to.get()
             ),
         }
     }
@@ -296,11 +300,11 @@ where
     println!(
         "Trigger settings are stored per profile but carry no profile in the protocol,\n\
          so profile {} has to be active while it is edited.",
-        wanted + 1
+        wanted.number()
     );
-    println!("Switching {} -> {} …", current + 1, wanted + 1);
+    println!("Switching {} -> {} …", current.number(), wanted.number());
     if let Err(e) = keyboard.set_profile(wanted) {
-        eprintln!("Failed to switch to profile {}: {e}", wanted + 1);
+        eprintln!("Failed to switch to profile {}: {e}", wanted.number());
         return Ok(());
     }
     let _guard = ProfileGuard {

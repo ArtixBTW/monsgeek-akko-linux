@@ -99,8 +99,10 @@ pub fn reset_key(
     layer: Layer,
 ) -> Result<(), KeyboardError> {
     match layer {
+        // The active profile, not 0: every other write in this module targets the
+        // profile the board is running, and a base-layer reset must match.
         Layer::Base => kb.set_keymatrix(
-            0,
+            kb.active_profile(),
             index.get(),
             device_default_keycode(kb, index).get(),
             true,

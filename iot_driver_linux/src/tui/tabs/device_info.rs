@@ -12,6 +12,7 @@ use monsgeek_keyboard::{
     led::{speed_from_wire, speed_to_wire},
     LedMode, LedParams, RgbColor, SleepTimeSettings,
 };
+use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::Transport;
 
 use crate::tui::shared::{AsyncResult, BatterySource, LoadState, PatchInfoData, SleepField};
@@ -466,12 +467,19 @@ impl App {
         self.status_msg = format!("Speed: {speed}/4");
     }
 
-    /// Step to the next profile (0-3, wrapping).
+    /// Step to the next profile, wrapping.
     pub(in crate::tui) fn cycle_profile(&mut self) {
-        self.set_profile((self.info.profile + 1) % 4);
+        self.step_profile(1);
     }
 
-    pub(in crate::tui) fn set_profile(&mut self, profile: u8) {
+    /// Move `delta` profiles from the current one, wrapping in both directions.
+    pub(in crate::tui) fn step_profile(&mut self, delta: isize) {
+        let n = Profile::ALL.len() as isize;
+        let cur = self.info.profile.get() as isize;
+        self.set_profile(Profile::ALL[(cur + delta).rem_euclid(n) as usize]);
+    }
+
+    pub(in crate::tui) fn set_profile(&mut self, profile: Profile) {
         let Some(keyboard) = self.keyboard.clone() else {
             return;
         };
@@ -480,7 +488,7 @@ impl App {
             return;
         }
         self.info.profile = profile;
-        self.status_msg = format!("Profile {} active", profile + 1);
+        self.status_msg = format!("Profile {} active", profile.get() + 1);
 
         // Keymaps and triggers are per-profile, so everything read from the old one
         // is now stale. Retarget the interface, drop the cached rows and re-fetch
@@ -978,7 +986,7 @@ pub(in crate::tui) fn render_device_info(f: &mut Frame, app: &mut App, area: Rec
             Span::raw("Profile:        "),
             editable_span(
                 loading.profile,
-                format!("{} (1-4)", info.profile + 1),
+                format!("{} (1-4)", info.profile.get() + 1),
                 Color::Cyan,
             ),
         ])),
