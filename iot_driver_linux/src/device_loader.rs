@@ -854,12 +854,16 @@ mod tests {
             &[1000, 500, 250, 125]
         );
         // Unknown maximum, or one that is not a real rate: offer nothing rather than guess.
-        assert!(keyboard_with("MonsGeek", 1, None)
-            .polling_rates()
-            .is_empty());
-        assert!(keyboard_with("MonsGeek", 1, Some(3000))
-            .polling_rates()
-            .is_empty());
+        assert!(
+            keyboard_with("MonsGeek", 1, None)
+                .polling_rates()
+                .is_empty()
+        );
+        assert!(
+            keyboard_with("MonsGeek", 1, Some(3000))
+                .polling_rates()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -7,8 +7,8 @@ pub mod registry;
 pub mod traits;
 pub mod types;
 
-pub use builtin::{M1V5HeProfile, M1_V5_HE_KEY_NAMES, M1_V5_HE_MATRIX_DEFAULTS};
+pub use builtin::{M1_V5_HE_KEY_NAMES, M1_V5_HE_MATRIX_DEFAULTS, M1V5HeProfile};
 pub use json::{JsonProfile, JsonProfileWrapper, LoadError};
-pub use registry::{profile_registry, ProfileRegistry};
+pub use registry::{ProfileRegistry, profile_registry};
 pub use traits::{DeviceProfile, DeviceProfileExt};
 pub use types::{DeviceFeatures, FnSysLayer, RangeConfig, TravelSettings};

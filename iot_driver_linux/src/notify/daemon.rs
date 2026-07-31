@@ -5,8 +5,8 @@
 //! traffic during playback — the daemon only reprograms on notification add,
 //! remove, or sleep/wake recovery.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::Mutex;
 use tracing::{debug, info};
 
@@ -15,7 +15,7 @@ use super::state::{self, NotificationStore};
 use crate::anim::{self, AnimEngine, SharedSlotInfo, SlotEntry};
 use crate::effect::EffectLibrary;
 use monsgeek_keyboard::VendorEvent;
-use monsgeek_transport::protocol::{led_grid, DefId, LedPos};
+use monsgeek_transport::protocol::{DefId, LedPos, led_grid};
 
 /// Run the notification daemon (blocking, standalone CLI entry point).
 ///
@@ -217,7 +217,7 @@ pub async fn run_with_cancel(
             _ = timer.tick() => {}
             evt = async {
                 match &mut event_rx {
-                    Some(ref mut rx) => rx.recv().await,
+                    Some(rx) => rx.recv().await,
                     None => std::future::pending().await,
                 }
             } => {

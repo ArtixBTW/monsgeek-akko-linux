@@ -5,7 +5,7 @@
 
 use std::fmt;
 
-use crate::protocol::{self, cmd, DefId};
+use crate::protocol::{self, DefId, cmd};
 use crate::types::ChecksumType;
 use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
@@ -2624,7 +2624,7 @@ mod tests {
         // Test response parsing (16 bytes minimum with values at indices 8-15)
         let mut resp_data = [0u8; 16];
         resp_data[0] = 0x91; // command echo
-                             // idle_bt = 120 at [8..10]
+        // idle_bt = 120 at [8..10]
         resp_data[8] = 0x78;
         resp_data[9] = 0x00;
         // idle_24g = 120 at [10..12]
@@ -2655,7 +2655,7 @@ mod tests {
         assert_eq!(buf[0], 0); // Report ID
         assert_eq!(buf[1], cmd::SET_PROFILE); // Command
         assert_eq!(buf[2], 2); // Profile
-                               // Checksum at buf[8] for Bit7
+        // Checksum at buf[8] for Bit7
     }
 
     #[test]

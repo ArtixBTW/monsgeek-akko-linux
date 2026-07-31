@@ -76,20 +76,20 @@ impl FirmwareVersions {
             let key = parts[i].to_lowercase();
 
             // Look for version value in next part
-            if i + 1 < parts.len() {
-                if let Ok(val) = u16::from_str_radix(parts[i + 1], 16) {
-                    match key.as_str() {
-                        "usb" => result.usb = Some(val),
-                        "rfv" | "rf" => result.rf = Some(val),
-                        "mledv" | "mled" => result.mled = Some(val),
-                        "nordv" | "nord" => result.nord = Some(val),
-                        "oledv" | "oled" => result.oled = Some(val),
-                        "flashv" | "flash" => result.flash = Some(val),
-                        _ => {}
-                    }
-                    i += 2;
-                    continue;
+            if i + 1 < parts.len()
+                && let Ok(val) = u16::from_str_radix(parts[i + 1], 16)
+            {
+                match key.as_str() {
+                    "usb" => result.usb = Some(val),
+                    "rfv" | "rf" => result.rf = Some(val),
+                    "mledv" | "mled" => result.mled = Some(val),
+                    "nordv" | "nord" => result.nord = Some(val),
+                    "oledv" | "oled" => result.oled = Some(val),
+                    "flashv" | "flash" => result.flash = Some(val),
+                    _ => {}
                 }
+                i += 2;
+                continue;
             }
             i += 1;
         }
@@ -265,13 +265,13 @@ pub fn check_firmware_blocking(device_id: u32) -> Result<FirmwareCheckResponse, 
         .map_err(|e| ApiError::ParseError(e.to_string()))?;
 
     // Check error code
-    if let Some(err_code) = json.get("errCode").and_then(|v| v.as_i64()) {
-        if err_code != 0 {
-            return Err(ApiError::ServerError(
-                err_code as i32,
-                "API error".to_string(),
-            ));
-        }
+    if let Some(err_code) = json.get("errCode").and_then(|v| v.as_i64())
+        && err_code != 0
+    {
+        return Err(ApiError::ServerError(
+            err_code as i32,
+            "API error".to_string(),
+        ));
     }
 
     // Parse data
@@ -373,13 +373,13 @@ pub async fn check_firmware(device_id: u32) -> Result<FirmwareCheckResponse, Api
         .map_err(|e| ApiError::ParseError(e.to_string()))?;
 
     // Check error code
-    if let Some(err_code) = json.get("errCode").and_then(|v| v.as_i64()) {
-        if err_code != 0 {
-            return Err(ApiError::ServerError(
-                err_code as i32,
-                "API error".to_string(),
-            ));
-        }
+    if let Some(err_code) = json.get("errCode").and_then(|v| v.as_i64())
+        && err_code != 0
+    {
+        return Err(ApiError::ServerError(
+            err_code as i32,
+            "API error".to_string(),
+        ));
     }
 
     // Parse data

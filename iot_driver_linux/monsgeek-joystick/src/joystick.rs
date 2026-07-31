@@ -5,8 +5,8 @@
 
 use crate::config::AxisId;
 use evdev::{
-    uinput::{VirtualDevice, VirtualDeviceBuilder},
     AbsInfo, AbsoluteAxisType, AttributeSet, InputEvent, Key, UinputAbsSetup,
+    uinput::{VirtualDevice, VirtualDeviceBuilder},
 };
 use std::collections::HashMap;
 use thiserror::Error;

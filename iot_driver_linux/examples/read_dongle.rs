@@ -30,13 +30,22 @@ fn main() {
 
                         if first || changed {
                             let elapsed = start.elapsed().as_secs_f32();
-                            println!("[{:5.1}s] bat={:3}% chrg={} online={} | {:02x} {:02x} {:02x} {:02x}{}",
+                            println!(
+                                "[{:5.1}s] bat={:3}% chrg={} online={} | {:02x} {:02x} {:02x} {:02x}{}",
                                 elapsed,
                                 buf[1],
                                 buf[2],
                                 buf[3],
-                                buf[4], buf[5], buf[6], buf[7],
-                                if changed && !first { " <-- CHANGED!" } else { "" });
+                                buf[4],
+                                buf[5],
+                                buf[6],
+                                buf[7],
+                                if changed && !first {
+                                    " <-- CHANGED!"
+                                } else {
+                                    ""
+                                }
+                            );
 
                             // Show which bytes changed
                             if changed && !first {

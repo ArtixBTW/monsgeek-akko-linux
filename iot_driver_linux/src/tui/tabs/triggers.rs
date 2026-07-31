@@ -5,19 +5,19 @@
 use ratatui::{prelude::*, widgets::*};
 use std::collections::VecDeque;
 
+use crate::TriggerSettings;
 use crate::key_action::KeyAction;
 use crate::protocol::hid;
 use crate::tui::widgets::PopupSelect;
-use crate::TriggerSettings;
 use monsgeek_keyboard::{
     DksAction, DksBinding, DksConfig, DksPhase, KeyMode, KeyTriggerSettings, ModeByte, Precision,
     TravelDepth,
 };
 use monsgeek_transport::protocol::{HidUsage, KeymatrixLayer, Layer};
 
-use super::super::keys::{all_hid_keys, CONSUMER_KEYS};
-use super::super::shared::{AsyncResult, LoadState, SpinnerConfig};
 use super::super::App;
+use super::super::keys::{CONSUMER_KEYS, all_hid_keys};
+use super::super::shared::{AsyncResult, LoadState, SpinnerConfig};
 use super::depth::get_key_label;
 
 // ============================================================================
@@ -590,13 +590,13 @@ impl TriggerEditModal {
     /// Apply the picker's selection to the base mode (keeping the RT flag) and
     /// close it.
     pub(in crate::tui) fn confirm_mode_picker(&mut self) {
-        if let Some(picker) = self.mode_picker.take() {
-            if let Some(&base) = picker.selected() {
-                let rt = self.mode & ModeByte::RT_FLAG != 0;
-                let preferred = self.current_field();
-                self.mode = ModeByte::new(base, rt).to_u8();
-                self.clamp_field_index(preferred);
-            }
+        if let Some(picker) = self.mode_picker.take()
+            && let Some(&base) = picker.selected()
+        {
+            let rt = self.mode & ModeByte::RT_FLAG != 0;
+            let preferred = self.current_field();
+            self.mode = ModeByte::new(base, rt).to_u8();
+            self.clamp_field_index(preferred);
         }
     }
 
@@ -612,10 +612,10 @@ impl TriggerEditModal {
 
     /// Apply the partner-picker selection and close it.
     pub(in crate::tui) fn confirm_key_picker(&mut self) {
-        if let Some(picker) = self.key_picker.take() {
-            if let Some(&partner) = picker.selected() {
-                self.snaptap_partner = partner;
-            }
+        if let Some(picker) = self.key_picker.take()
+            && let Some(&partner) = picker.selected()
+        {
+            self.snaptap_partner = partner;
         }
     }
 
@@ -742,10 +742,10 @@ impl TriggerEditModal {
             return highlighted;
         }
         let mut usages = self.chord_buf.clone();
-        if let KeyAction::Key(u) = highlighted {
-            if !usages.contains(&u) {
-                usages.push(u);
-            }
+        if let KeyAction::Key(u) = highlighted
+            && !usages.contains(&u)
+        {
+            usages.push(u);
         }
         KeyAction::chord(usages)
     }
@@ -776,10 +776,10 @@ impl TriggerEditModal {
 
     /// Apply the DKS action-picker selection and close it.
     pub(in crate::tui) fn confirm_dks_action_picker(&mut self) {
-        if let Some((idx, picker)) = self.dks_action_picker.take() {
-            if let Some(&action) = picker.selected() {
-                self.dks_phases[self.dks_binding_index][idx] = action;
-            }
+        if let Some((idx, picker)) = self.dks_action_picker.take()
+            && let Some(&action) = picker.selected()
+        {
+            self.dks_phases[self.dks_binding_index][idx] = action;
         }
     }
 
@@ -1036,10 +1036,10 @@ impl App {
                         // mode; Snap-Tap pairing only in Snap-Tap mode.
                         let key = key_index as u8;
                         let mut extra = Vec::new();
-                        if mode_byte.base == KeyMode::ModTap {
-                            if let Err(e) = keyboard.set_modtap_time(key, modal.modtap_ms) {
-                                extra.push(format!("mt_time: {e}"));
-                            }
+                        if mode_byte.base == KeyMode::ModTap
+                            && let Err(e) = keyboard.set_modtap_time(key, modal.modtap_ms)
+                        {
+                            extra.push(format!("mt_time: {e}"));
                         }
                         if mode_byte.base == KeyMode::SnapTap {
                             let res = match modal.snaptap_partner {

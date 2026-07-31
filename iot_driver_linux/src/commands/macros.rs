@@ -3,8 +3,8 @@
 use super::CommandResult;
 use iot_driver::macro_seq::MacroSeq;
 use iot_driver::protocol::hid;
-use monsgeek_keyboard::{parse_macro_events, KeyboardInterface};
-use monsgeek_transport::protocol::{matrix, HidUsage, Layer, MacroSlot, MatrixPos};
+use monsgeek_keyboard::{KeyboardInterface, parse_macro_events};
+use monsgeek_transport::protocol::{HidUsage, Layer, MacroSlot, MatrixPos, matrix};
 
 /// Get macro for a key
 pub fn get_macro(keyboard: &KeyboardInterface, key: &str) -> CommandResult {

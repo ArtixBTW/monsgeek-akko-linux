@@ -29,9 +29,9 @@
 
 use crate::protocol::{cmd, magnetism as mag_const};
 use crate::{
-    decode_magnetism_data, try_parse_command, try_parse_response, ChecksumType, MagnetismData,
-    ParsedCommand, ParsedResponse, TimestampedEvent, Transport, TransportDeviceInfo,
-    TransportError, VendorEvent,
+    ChecksumType, MagnetismData, ParsedCommand, ParsedResponse, TimestampedEvent, Transport,
+    TransportDeviceInfo, TransportError, VendorEvent, decode_magnetism_data, try_parse_command,
+    try_parse_response,
 };
 use crossterm::style::Stylize;
 use parking_lot::Mutex;
@@ -435,7 +435,7 @@ impl Printer {
                     let finished_keys: Vec<String> = values
                         .iter()
                         .enumerate()
-                        .filter(|(_, &v)| v >= 300)
+                        .filter(|&(_, &v)| v >= 300)
                         .map(|(i, _)| {
                             let key_idx = crate::protocol::MatrixPos::new((base_idx + i) as u8);
                             format!("{}({})", key_idx.name(), key_idx.get())
@@ -593,10 +593,10 @@ impl Printer {
                     eprintln!("{} {} {:?}", ts_prefix, "EVT".yellow().bold(), event);
                 }
 
-                if self.config.show_hex {
-                    if let Some(data) = raw_data {
-                        eprintln!("         {}   {:02x?}", "HEX".dim(), data);
-                    }
+                if self.config.show_hex
+                    && let Some(data) = raw_data
+                {
+                    eprintln!("         {}   {:02x?}", "HEX".dim(), data);
                 }
             }
             OutputFormat::Json => {

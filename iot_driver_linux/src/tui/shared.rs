@@ -4,15 +4,15 @@ use std::path::PathBuf;
 
 use tokio::sync::mpsc;
 
+use crate::TriggerSettings;
 use crate::device_loader::PollingRateSupport;
 use crate::firmware_api::FirmwareCheckResult;
 use crate::hid::BatteryInfo;
 use crate::keymap::KeyRow;
-use crate::TriggerSettings;
 use monsgeek_keyboard::TravelDepth;
 use monsgeek_keyboard::{KeyboardOptions as KbOptions, LedParams, Precision, SleepTimeSettings};
-use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::TransportType;
+use monsgeek_transport::protocol::Profile;
 
 #[cfg(feature = "notify")]
 use crate::effect::EffectLibrary;

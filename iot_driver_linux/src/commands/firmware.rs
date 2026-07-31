@@ -24,12 +24,12 @@ pub fn validate(file: &PathBuf) -> CommandResult {
             }
 
             // If ZIP, list contents
-            if file.extension().map(|e| e == "zip").unwrap_or(false) {
-                if let Ok(contents) = FirmwareFile::list_zip_contents(file) {
-                    println!("\nZIP contents:");
-                    for name in contents {
-                        println!("  - {name}");
-                    }
+            if file.extension().map(|e| e == "zip").unwrap_or(false)
+                && let Ok(contents) = FirmwareFile::list_zip_contents(file)
+            {
+                println!("\nZIP contents:");
+                for name in contents {
+                    println!("  - {name}");
                 }
             }
         }
@@ -79,7 +79,7 @@ pub fn dry_run(ctx: &CmdCtx, file: &PathBuf, verbose: bool) -> CommandResult {
 #[cfg(feature = "firmware-api")]
 pub fn check(ctx: &CmdCtx, device_id: Option<u32>) -> CommandResult {
     use iot_driver::firmware_api::{
-        check_firmware_blocking as check_firmware, device_ids, ApiError,
+        ApiError, check_firmware_blocking as check_firmware, device_ids,
     };
 
     // Try to get device ID from connected device or argument
@@ -124,17 +124,17 @@ pub fn check(ctx: &CmdCtx, device_id: Option<u32>) -> CommandResult {
 
             // Compare with current device if connected
             let kb = keyboard.or_else(|| super::open_keyboard(ctx).ok());
-            if let Some(kb) = kb {
-                if let Ok(version) = kb.get_version() {
-                    let current_usb = version.raw;
-                    println!("\nCurrent device USB version: 0x{current_usb:04X}");
+            if let Some(kb) = kb
+                && let Ok(version) = kb.get_version()
+            {
+                let current_usb = version.raw;
+                println!("\nCurrent device USB version: 0x{current_usb:04X}");
 
-                    if let Some(server_usb) = response.versions.usb {
-                        if server_usb > current_usb {
-                            println!("UPDATE AVAILABLE: 0x{current_usb:04X} -> 0x{server_usb:04X}");
-                        } else {
-                            println!("Firmware is up to date.");
-                        }
+                if let Some(server_usb) = response.versions.usb {
+                    if server_usb > current_usb {
+                        println!("UPDATE AVAILABLE: 0x{current_usb:04X} -> 0x{server_usb:04X}");
+                    } else {
+                        println!("Firmware is up to date.");
                     }
                 }
             }
@@ -263,7 +263,7 @@ impl iot_driver::flash::FlashProgress for CliFlashProgress {
 
 /// Flash firmware to a connected device (keyboard or dongle).
 pub fn flash(file: &PathBuf, device: Option<&str>, dongle: bool, yes: bool) -> CommandResult {
-    use iot_driver::flash::{flash_firmware, FlashOptions};
+    use iot_driver::flash::{FlashOptions, flash_firmware};
     use iot_driver::protocol::firmware_update::FlashTarget;
 
     let target = if dongle {

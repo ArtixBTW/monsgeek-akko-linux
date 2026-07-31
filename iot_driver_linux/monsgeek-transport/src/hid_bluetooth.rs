@@ -52,11 +52,11 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tracing::{debug, trace};
 
+use crate::Transport;
 use crate::error::TransportError;
-use crate::event_parser::{parse_ble_event, EventReaderConfig, EventSubsystem};
+use crate::event_parser::{EventReaderConfig, EventSubsystem, parse_ble_event};
 use crate::protocol::{self, ble};
 use crate::types::{ChecksumType, TimestampedEvent, TransportDeviceInfo, VendorEvent};
-use crate::Transport;
 
 /// HID transport for Bluetooth Low Energy connection
 ///
@@ -169,18 +169,18 @@ impl Transport for HidBluetoothTransport {
     }
 
     fn get_battery_status(&self) -> Result<(u8, bool, bool), TransportError> {
-        if let Some(ref serial) = self.info.serial {
-            if let Some(level) = query_bluez_battery(serial) {
-                debug!("BLE battery from BlueZ: {}%", level);
-                return Ok((level, true, false));
-            }
+        if let Some(ref serial) = self.info.serial
+            && let Some(level) = query_bluez_battery(serial)
+        {
+            debug!("BLE battery from BlueZ: {}%", level);
+            return Ok((level, true, false));
         }
 
-        if let Some(ref name) = self.info.product_name {
-            if let Some(level) = query_bluez_battery_by_name(name) {
-                debug!("BLE battery from BlueZ (by name): {}%", level);
-                return Ok((level, true, false));
-            }
+        if let Some(ref name) = self.info.product_name
+            && let Some(level) = query_bluez_battery_by_name(name)
+        {
+            debug!("BLE battery from BlueZ (by name): {}%", level);
+            return Ok((level, true, false));
         }
 
         trace!("Could not get BLE battery from BlueZ");
@@ -222,12 +222,11 @@ fn query_bluez_battery(mac_or_serial: &str) -> Option<u8> {
     for line in stdout.lines() {
         if line.contains("Battery Percentage:") {
             // Parse the decimal value in parentheses
-            if let Some(start) = line.rfind('(') {
-                if let Some(end) = line.rfind(')') {
-                    if let Ok(level) = line[start + 1..end].parse::<u8>() {
-                        return Some(level.min(100));
-                    }
-                }
+            if let Some(start) = line.rfind('(')
+                && let Some(end) = line.rfind(')')
+                && let Ok(level) = line[start + 1..end].parse::<u8>()
+            {
+                return Some(level.min(100));
             }
             // Try parsing hex value after "0x"
             if let Some(hex_start) = line.find("0x") {

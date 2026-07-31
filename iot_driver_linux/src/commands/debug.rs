@@ -1,12 +1,12 @@
 //! Debug command handlers.
 
 use super::{
-    open_preferred_transport, setup_interrupt_handler, with_keyboard, CmdCtx, CommandResult,
+    CmdCtx, CommandResult, open_preferred_transport, setup_interrupt_handler, with_keyboard,
 };
 use iot_driver::protocol::cmd;
 use monsgeek_keyboard::KeyboardInterface;
 use monsgeek_transport::protocol::cmd as transport_cmd;
-use monsgeek_transport::{list_devices_sync, ChecksumType, Transport};
+use monsgeek_transport::{ChecksumType, Transport, list_devices_sync};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::time::Instant;

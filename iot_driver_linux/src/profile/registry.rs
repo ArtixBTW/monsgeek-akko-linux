@@ -220,10 +220,10 @@ impl ProfileRegistry {
             let extra = matrix.map_or(0, |m| m.matrix_size());
             names.resize(names.len().max(extra), String::new());
             for (i, name) in names.iter_mut().enumerate() {
-                if name.is_empty() {
-                    if let Some(db) = db_names(i) {
-                        *name = db;
-                    }
+                if name.is_empty()
+                    && let Some(db) = db_names(i)
+                {
+                    *name = db;
                 }
             }
             return Some(names);

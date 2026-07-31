@@ -12,23 +12,23 @@ use shared::*;
 
 use tabs::audio::AudioTabState;
 use tabs::depth::{get_key_label, render_depth_monitor};
-use tabs::device_info::{render_device_info, HexColorTarget, InfoTag};
+use tabs::device_info::{HexColorTarget, InfoTag, render_device_info};
 
 use tabs::key_mapping::{KeyMappingFilter, KeyMappingView, KmSort};
-use tabs::triggers::{render_trigger_edit_modal, TriggerEditModal, TriggerField};
+use tabs::triggers::{TriggerEditModal, TriggerField, render_trigger_edit_modal};
 
 #[cfg(feature = "notify")]
-use crate::effect::{default_effects_path, EffectLibrary};
+use crate::effect::{EffectLibrary, default_effects_path};
 #[cfg(feature = "notify")]
-use tabs::notify::{handle_notify_input, render_notify, NotifyFocus, NotifyTabState};
+use tabs::notify::{NotifyFocus, NotifyTabState, handle_notify_input, render_notify};
 
 use crossterm::{
+    ExecutableCommand,
     event::{
         DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
         MouseButton, MouseEventKind,
     },
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    ExecutableCommand,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
 use ratatui::{prelude::*, widgets::*};
@@ -37,7 +37,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, stdout};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use throbber_widgets_tui::{ThrobberState, BRAILLE_SIX};
+use throbber_widgets_tui::{BRAILLE_SIX, ThrobberState};
 use tokio::sync::{broadcast, mpsc};
 use tui_scrollview::ScrollViewState;
 
@@ -46,12 +46,12 @@ use crate::firmware_api::FirmwareCheckResult;
 use crate::hid::BatteryInfo;
 use crate::keymap::{self, KeyRow};
 use crate::power_supply::find_hid_battery_power_supply;
-use crate::{cmd, devices, FirmwareSettings, TriggerSettings};
+use crate::{FirmwareSettings, TriggerSettings, cmd, devices};
 
 // Keyboard abstraction layer - using async interface directly
 use monsgeek_keyboard::{
-    led::speed_to_wire, KeyboardInterface, Precision, SleepTimeSettings, TimestampedEvent,
-    VendorEvent,
+    KeyboardInterface, Precision, SleepTimeSettings, TimestampedEvent, VendorEvent,
+    led::speed_to_wire,
 };
 use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::{FlowControlTransport, HidDiscovery, Transport};
@@ -412,10 +412,10 @@ impl App {
         kb.set_active_profile(kb.get_profile().unwrap_or_default());
 
         // Set non-analog positions from matrix database (encoder/GPIO keys).
-        if let Some(matrix) = matrix_db {
-            if let Some(positions) = &matrix.non_analog_positions {
-                kb.set_non_analog_positions(positions.clone());
-            }
+        if let Some(matrix) = matrix_db
+            && let Some(positions) = &matrix.non_analog_positions
+        {
+            kb.set_non_analog_positions(positions.clone());
         }
 
         let matrix_size = kb.matrix_size();
@@ -464,13 +464,13 @@ impl App {
         self.connected = true;
 
         // Load dongle info (instant dongle-local queries)
-        if self.is_wireless {
-            if let Some(ref keyboard) = self.keyboard {
-                let transport = keyboard.transport();
-                self.dongle_info = transport.query_dongle_info().ok().flatten();
-                self.dongle_status = transport.query_dongle_status().ok().flatten();
-                self.rf_info = transport.query_rf_info().ok().flatten();
-            }
+        if self.is_wireless
+            && let Some(ref keyboard) = self.keyboard
+        {
+            let transport = keyboard.transport();
+            self.dongle_info = transport.query_dongle_info().ok().flatten();
+            self.dongle_status = transport.query_dongle_status().ok().flatten();
+            self.rf_info = transport.query_rf_info().ok().flatten();
         }
 
         // Load battery status immediately for wireless devices
@@ -586,10 +586,10 @@ impl App {
 
                 kb.set_active_profile(kb.get_profile().unwrap_or_default());
 
-                if let Some(matrix) = matrix_db {
-                    if let Some(positions) = &matrix.non_analog_positions {
-                        kb.set_non_analog_positions(positions.clone());
-                    }
+                if let Some(matrix) = matrix_db
+                    && let Some(positions) = &matrix.non_analog_positions
+                {
+                    kb.set_non_analog_positions(positions.clone());
                 }
 
                 let matrix_size = kb.matrix_size();
@@ -754,13 +754,13 @@ impl App {
                 self.sleep_settings = Some(settings);
                 self.loading.sleep_time = LoadState::Loaded;
                 // Update options if already loaded
-                if let Some(ref mut opts) = self.options {
-                    if let Some(ref s) = self.sleep_settings {
-                        opts.idle_bt = s.idle_bt;
-                        opts.idle_24g = s.idle_24g;
-                        opts.deep_bt = s.deep_bt;
-                        opts.deep_24g = s.deep_24g;
-                    }
+                if let Some(ref mut opts) = self.options
+                    && let Some(ref s) = self.sleep_settings
+                {
+                    opts.idle_bt = s.idle_bt;
+                    opts.idle_24g = s.idle_24g;
+                    opts.deep_bt = s.deep_bt;
+                    opts.deep_24g = s.deep_24g;
                 }
             }
             AsyncResult::SleepTime(Err(_)) => {
@@ -1293,14 +1293,13 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                         KeyCode::Up | KeyCode::Char('k') => {
                             if app.tab == 1 && app.depth_view_mode == DepthViewMode::BarChart {
                                 let row_starts = [0, 15, 30, 43, 56];
-                                if let Some(row) = row_starts.iter().rposition(|&s| s <= app.depth_cursor) {
-                                    if row > 0 {
+                                if let Some(row) = row_starts.iter().rposition(|&s| s <= app.depth_cursor)
+                                    && row > 0 {
                                         let col = app.depth_cursor - row_starts[row];
                                         let prev_row_start = row_starts[row - 1];
                                         let prev_row_size = row_starts[row] - prev_row_start;
                                         app.depth_cursor = prev_row_start + col.min(prev_row_size - 1);
                                     }
-                                }
                             } else if app.tab == 2 {
                                 if app.key_mapping_view == KeyMappingView::Layout {
                                     tabs::key_mapping::layout_move(&mut app, 0, -1);
@@ -1324,14 +1323,13 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                         KeyCode::Down | KeyCode::Char('j') => {
                             if app.tab == 1 && app.depth_view_mode == DepthViewMode::BarChart {
                                 let row_starts = [0, 15, 30, 43, 56, 66];
-                                if let Some(row) = row_starts.iter().rposition(|&s| s <= app.depth_cursor) {
-                                    if row < 4 {
+                                if let Some(row) = row_starts.iter().rposition(|&s| s <= app.depth_cursor)
+                                    && row < 4 {
                                         let col = app.depth_cursor - row_starts[row];
                                         let next_row_start = row_starts[row + 1];
                                         let next_row_size = row_starts[row + 2] - next_row_start;
                                         app.depth_cursor = next_row_start + col.min(next_row_size - 1);
                                     }
-                                }
                             } else if app.tab == 2 {
                                 if app.key_mapping_view == KeyMappingView::Layout {
                                     tabs::key_mapping::layout_move(&mut app, 0, 1);
@@ -1723,8 +1721,8 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                 }
 
                 // Drain remaining events without blocking (coalesce depth events by key)
-                if !channel_closed {
-                    if let Some(ref mut rx) = app.event_rx {
+                if !channel_closed
+                    && let Some(ref mut rx) = app.event_rx {
                         loop {
                             match rx.try_recv() {
                                 Ok(ts) => {
@@ -1746,7 +1744,6 @@ pub async fn run(device_selector: Option<String>) -> io::Result<()> {
                             }
                         }
                     }
-                }
 
                 if channel_closed {
                     app.event_rx = None;

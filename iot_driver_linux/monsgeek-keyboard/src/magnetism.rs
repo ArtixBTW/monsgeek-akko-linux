@@ -684,7 +684,7 @@ mod travel_depth_tests {
         assert_eq!(d.format(Precision::Coarse), "20.4mm"); // 0.1mm units
         assert_eq!(d.format(Precision::Medium), "2.04mm"); // 0.01mm units
         assert_eq!(d.format(Precision::Fine), "1.020mm"); // 0.005mm units
-                                                          // A trailing zero is kept, so the column width does not jump around.
+        // A trailing zero is kept, so the column width does not jump around.
         assert_eq!(
             TravelDepth::from_raw(200).format(Precision::Medium),
             "2.00mm"

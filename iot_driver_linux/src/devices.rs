@@ -20,10 +20,10 @@ fn resolve_json_device(device_id: Option<i32>, vid: u16, pid: u16) -> Option<Dev
 
     // The device ID comes from the keyboard itself, so it leads; the USB IDs only
     // disambiguate the few IDs claimed by more than one product.
-    if let Some(id) = device_id {
-        if let Some(d) = registry.get_device_info_by_id_and_usb(id, vid, pid) {
-            return Some(DeviceInfo::from_json(d));
-        }
+    if let Some(id) = device_id
+        && let Some(d) = registry.get_device_info_by_id_and_usb(id, vid, pid)
+    {
+        return Some(DeviceInfo::from_json(d));
     }
 
     // Fall back to VID/PID in database (may be ambiguous)

@@ -329,7 +329,7 @@ fn macro_set_and_readback() {
     macro_data.push(0x8A); // down + 10ms delay
     macro_data.push(0x04); // 'a' keycode
     macro_data.push(0x0A); // up + 10ms delay
-                           // Pad to 56 bytes
+    // Pad to 56 bytes
     while macro_data.len() < 56 {
         macro_data.push(0);
     }

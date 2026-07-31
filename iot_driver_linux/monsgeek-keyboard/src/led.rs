@@ -1,8 +1,8 @@
 //! LED and RGB lighting types and utilities
 
 pub use monsgeek_transport::command::{
-    speed_from_wire, speed_to_wire, LedMode, Rgb as RgbColor, BRIGHTNESS_MAX, DAZZLE_OFF,
-    DAZZLE_ON, SPEED_MAX,
+    BRIGHTNESS_MAX, DAZZLE_OFF, DAZZLE_ON, LedMode, Rgb as RgbColor, SPEED_MAX, speed_from_wire,
+    speed_to_wire,
 };
 use monsgeek_transport::command::{
     LedParamsResponse as TransportLedParamsResponse, SetLedParams as TransportSetLedParams,

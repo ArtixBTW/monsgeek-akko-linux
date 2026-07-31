@@ -174,13 +174,13 @@ pub fn render(rows: &[KeyRow], opts: &ListOptions) -> String {
             if !slot.note.is_empty() {
                 out.push_str(&format!("   {}", slot.note));
             }
-            if opts.raw {
-                if let Some(b) = slot.raw {
-                    out.push_str(&format!(
-                        "   [{:02x} {:02x} {:02x} {:02x}]",
-                        b[0], b[1], b[2], b[3]
-                    ));
-                }
+            if opts.raw
+                && let Some(b) = slot.raw
+            {
+                out.push_str(&format!(
+                    "   [{:02x} {:02x} {:02x} {:02x}]",
+                    b[0], b[1], b[2], b[3]
+                ));
             }
             out.push('\n');
         }

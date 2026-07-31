@@ -9,7 +9,7 @@
 //! crate stays wire-only.
 
 use crate::keymap::default_keycode;
-use monsgeek_transport::protocol::{matrix, MatrixPos};
+use monsgeek_transport::protocol::{MatrixPos, matrix};
 use std::fmt;
 use std::str::FromStr;
 
@@ -111,10 +111,10 @@ impl FromStr for KeyClass {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let lower = s.to_ascii_lowercase();
-        if let Some(n) = lower.strip_prefix("row").and_then(|r| r.parse::<u8>().ok()) {
-            if n < ROWS {
-                return Ok(Self::Row(n));
-            }
+        if let Some(n) = lower.strip_prefix("row").and_then(|r| r.parse::<u8>().ok())
+            && n < ROWS
+        {
+            return Ok(Self::Row(n));
         }
         match lower.as_str() {
             "all" => Ok(Self::All),
@@ -149,10 +149,11 @@ pub fn content_class(index: MatrixPos) -> Option<KeyClass> {
         return Some(KeyClass::Navigation);
     }
     // F1..F12. Guarded on the digits so a future "Fn"-like name can't slip in.
-    if let Some(rest) = name.strip_prefix('F') {
-        if !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()) {
-            return Some(KeyClass::Function);
-        }
+    if let Some(rest) = name.strip_prefix('F')
+        && !rest.is_empty()
+        && rest.bytes().all(|b| b.is_ascii_digit())
+    {
+        return Some(KeyClass::Function);
     }
     let mut chars = name.chars();
     if let (Some(c), None) = (chars.next(), chars.next()) {

@@ -11,10 +11,10 @@ use crate::keyclass::KeyClass;
 use crate::keymap::KeyRow;
 use crate::tui::keys::RemapLayerView;
 use monsgeek_keyboard::{KeyMode, ModeByte};
-use monsgeek_transport::protocol::{matrix, MatrixPos};
+use monsgeek_transport::protocol::{MatrixPos, matrix};
 
-use super::super::shared::LoadState;
 use super::super::App;
+use super::super::shared::LoadState;
 
 /// List vs. keyboard-layout presentation for the Key Mapping tab.
 #[derive(Clone, Copy, PartialEq, Default)]

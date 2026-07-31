@@ -8,14 +8,14 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use crossterm::{
-    cursor, event,
+    ExecutableCommand, QueueableCommand, cursor, event,
     style::{self, Color, Stylize},
-    terminal, ExecutableCommand, QueueableCommand,
+    terminal,
 };
 
-use super::{resolve, EffectDef, ResolvedEffect};
-use crate::led_stream::{apply_power_budget, send_full_frame, DEFAULT_POWER_BUDGET_MA};
-use crate::notify::keymap::{logical_to_led_pos, COLS, MATRIX_LEN, ROWS};
+use super::{EffectDef, ResolvedEffect, resolve};
+use crate::led_stream::{DEFAULT_POWER_BUDGET_MA, apply_power_budget, send_full_frame};
+use crate::notify::keymap::{COLS, MATRIX_LEN, ROWS, logical_to_led_pos};
 use crate::profile::M1_V5_HE_KEY_NAMES;
 use monsgeek_transport::protocol::LedPos;
 
@@ -76,17 +76,17 @@ fn run_loop(
 
     loop {
         // Check for quit
-        if event::poll(Duration::ZERO)? {
-            if let event::Event::Key(key) = event::read()? {
-                match key.code {
-                    event::KeyCode::Char('q') | event::KeyCode::Esc => break,
-                    event::KeyCode::Char('c')
-                        if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
-                    {
-                        break
-                    }
-                    _ => {}
+        if event::poll(Duration::ZERO)?
+            && let event::Event::Key(key) = event::read()?
+        {
+            match key.code {
+                event::KeyCode::Char('q') | event::KeyCode::Esc => break,
+                event::KeyCode::Char('c')
+                    if key.modifiers.contains(event::KeyModifiers::CONTROL) =>
+                {
+                    break;
                 }
+                _ => {}
             }
         }
 

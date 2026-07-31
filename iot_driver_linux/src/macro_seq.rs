@@ -137,12 +137,12 @@ fn parse_delay(s: &str) -> Result<u16, ParseMacroSeqError> {
 /// Parse a parenthesized delay suffix like `(50ms)` from the end of a token.
 /// Returns (token_without_delay, optional_delay).
 fn split_paren_delay(s: &str) -> (&str, Option<u16>) {
-    if let Some(open) = s.rfind('(') {
-        if s.ends_with(')') {
-            let inner = &s[open + 1..s.len() - 1];
-            if let Ok(delay) = parse_delay(inner) {
-                return (&s[..open], Some(delay));
-            }
+    if let Some(open) = s.rfind('(')
+        && s.ends_with(')')
+    {
+        let inner = &s[open + 1..s.len() - 1];
+        if let Ok(delay) = parse_delay(inner) {
+            return (&s[..open], Some(delay));
         }
     }
     (s, None)
@@ -404,12 +404,14 @@ impl MacroSeq {
             let (code, is_down, delay) = events[i];
 
             // Try to match combo tap: ↓Mod(0ms)... ↓Key(d) ↑Key(0ms) ↑Mod...(d2)
-            if is_down && is_modifier(code) && delay == 0 {
-                if let Some((combo_step, consumed)) = try_match_combo(&events[i..], default_delay) {
-                    steps.push(combo_step);
-                    i += consumed;
-                    continue;
-                }
+            if is_down
+                && is_modifier(code)
+                && delay == 0
+                && let Some((combo_step, consumed)) = try_match_combo(&events[i..], default_delay)
+            {
+                steps.push(combo_step);
+                i += consumed;
+                continue;
             }
 
             // Try to match simple tap: ↓K(default_delay) ↑K(d2) (consecutive, same keycode)

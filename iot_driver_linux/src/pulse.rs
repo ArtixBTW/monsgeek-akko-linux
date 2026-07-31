@@ -134,10 +134,10 @@ pub fn resolve_source(requested: Option<&str>) -> Result<SourceEntry, String> {
     }
 
     let Some(req) = requested else {
-        if let Some(def) = default_monitor_name() {
-            if let Some(s) = sources.iter().find(|s| s.name == def) {
-                return Ok(s.clone());
-            }
+        if let Some(def) = default_monitor_name()
+            && let Some(s) = sources.iter().find(|s| s.name == def)
+        {
+            return Ok(s.clone());
         }
         if let Some(s) = sources.iter().find(|s| s.is_monitor) {
             return Ok(s.clone());

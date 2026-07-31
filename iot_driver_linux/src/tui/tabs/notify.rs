@@ -4,19 +4,19 @@
 
 use crossterm::event::KeyCode;
 use ratatui::{prelude::*, widgets::*};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use crate::effect::{
-    required_variables, resolve as resolve_effect, EffectDef, EffectLibrary, KeyframeDef, NumOrVar,
-    ResolvedEffect,
+    EffectDef, EffectLibrary, KeyframeDef, NumOrVar, ResolvedEffect, required_variables,
+    resolve as resolve_effect,
 };
 
 use monsgeek_transport::protocol::{LedPos, StripIdx};
 
-use super::super::shared::AsyncResult;
 use super::super::App;
+use super::super::shared::AsyncResult;
 
 // ============================================================================
 // Types
@@ -131,35 +131,29 @@ const EASING_NAMES: &[&str] = &[
 /// Extract the default value for a variable from an effect definition.
 fn extract_var_default(def: &EffectDef, var_name: &str) -> Option<String> {
     // Check effect-level color
-    if let Some(ref c) = def.color {
-        if let Some(var_ref) = c.strip_prefix('$') {
-            if let Some((name, default)) = var_ref.split_once(':') {
-                if name == var_name {
-                    return Some(default.to_string());
-                }
-            }
-        }
+    if let Some(ref c) = def.color
+        && let Some(var_ref) = c.strip_prefix('$')
+        && let Some((name, default)) = var_ref.split_once(':')
+        && name == var_name
+    {
+        return Some(default.to_string());
     }
     // Check keyframe timing and colors
     for kf in &def.keyframes {
-        if let Some(ref c) = kf.color {
-            if let Some(var_ref) = c.strip_prefix('$') {
-                if let Some((name, default)) = var_ref.split_once(':') {
-                    if name == var_name {
-                        return Some(default.to_string());
-                    }
-                }
-            }
+        if let Some(ref c) = kf.color
+            && let Some(var_ref) = c.strip_prefix('$')
+            && let Some((name, default)) = var_ref.split_once(':')
+            && name == var_name
+        {
+            return Some(default.to_string());
         }
         for nov in [&kf.t, &kf.d].into_iter().flatten() {
-            if let NumOrVar::Var(s) = nov {
-                if let Some(var_ref) = s.strip_prefix('$') {
-                    if let Some((name, default)) = var_ref.split_once(':') {
-                        if name == var_name {
-                            return Some(default.to_string());
-                        }
-                    }
-                }
+            if let NumOrVar::Var(s) = nov
+                && let Some(var_ref) = s.strip_prefix('$')
+                && let Some((name, default)) = var_ref.split_once(':')
+                && name == var_name
+            {
+                return Some(default.to_string());
             }
         }
     }
@@ -331,17 +325,16 @@ pub(in crate::tui) fn handle_notify_input(app: &mut App, key: KeyCode) {
                 // Delete current keyframe
                 if let Some(ref mut lib) = app.notify.effects {
                     let name = app.notify.effect_names[app.notify.selected_effect].clone();
-                    if let Some(def) = lib.effects.get_mut(&name) {
-                        if def.keyframes.len() > 1 {
-                            let idx = app.notify.selected_keyframe.min(def.keyframes.len() - 1);
-                            def.keyframes.remove(idx);
-                            if app.notify.selected_keyframe >= def.keyframes.len() {
-                                app.notify.selected_keyframe =
-                                    def.keyframes.len().saturating_sub(1);
-                            }
-                            app.notify.dirty = true;
-                            app.notify_recompute_preview();
+                    if let Some(def) = lib.effects.get_mut(&name)
+                        && def.keyframes.len() > 1
+                    {
+                        let idx = app.notify.selected_keyframe.min(def.keyframes.len() - 1);
+                        def.keyframes.remove(idx);
+                        if app.notify.selected_keyframe >= def.keyframes.len() {
+                            app.notify.selected_keyframe = def.keyframes.len().saturating_sub(1);
                         }
+                        app.notify.dirty = true;
+                        app.notify_recompute_preview();
                     }
                 }
             }
@@ -375,30 +368,30 @@ pub(in crate::tui) fn handle_notify_input(app: &mut App, key: KeyCode) {
                 // Apply edit
                 if let Some(ref mut lib) = app.notify.effects {
                     let name = app.notify.effect_names[app.notify.selected_effect].clone();
-                    if let Some(def) = lib.effects.get_mut(&name) {
-                        if let Some(kf) = def.keyframes.get_mut(app.notify.selected_keyframe) {
-                            match app.notify.selected_field {
-                                0 => {
-                                    // Timing
-                                    let val = parse_num_or_var(&app.notify.edit_input);
-                                    if kf.d.is_some() {
-                                        kf.d = Some(val);
-                                    } else {
-                                        kf.t = Some(val);
-                                    }
+                    if let Some(def) = lib.effects.get_mut(&name)
+                        && let Some(kf) = def.keyframes.get_mut(app.notify.selected_keyframe)
+                    {
+                        match app.notify.selected_field {
+                            0 => {
+                                // Timing
+                                let val = parse_num_or_var(&app.notify.edit_input);
+                                if kf.d.is_some() {
+                                    kf.d = Some(val);
+                                } else {
+                                    kf.t = Some(val);
                                 }
-                                1 => {
-                                    if let Ok(v) = app.notify.edit_input.parse::<f64>() {
-                                        kf.v = v.clamp(0.0, 1.0);
-                                    }
-                                }
-                                2 => {
-                                    kf.easing = app.notify.edit_input.clone();
-                                }
-                                _ => {}
                             }
-                            app.notify.dirty = true;
+                            1 => {
+                                if let Ok(v) = app.notify.edit_input.parse::<f64>() {
+                                    kf.v = v.clamp(0.0, 1.0);
+                                }
+                            }
+                            2 => {
+                                kf.easing = app.notify.edit_input.clone();
+                            }
+                            _ => {}
                         }
+                        app.notify.dirty = true;
                     }
                 }
                 app.notify.focus = NotifyFocus::KeyframeList;

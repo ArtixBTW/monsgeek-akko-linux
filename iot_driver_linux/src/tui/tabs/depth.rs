@@ -5,11 +5,11 @@
 use ratatui::{prelude::*, widgets::*};
 use std::time::{Duration, Instant};
 
-use monsgeek_keyboard::{led::speed_from_wire, VendorEvent};
+use monsgeek_keyboard::{VendorEvent, led::speed_from_wire};
 use monsgeek_transport::protocol::Profile;
 
-use super::super::shared::{DepthViewMode, DEPTH_HISTORY_LEN};
 use super::super::App;
+use super::super::shared::{DEPTH_HISTORY_LEN, DepthViewMode};
 
 // ============================================================================
 // Rendering

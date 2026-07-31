@@ -5,12 +5,12 @@
 //! single source of truth for matrix position → key name mapping.
 
 use crate::tui::app::App;
-use monsgeek_transport::protocol::{matrix, MatrixPos};
+use monsgeek_transport::protocol::{MatrixPos, matrix};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 /// Number of columns in the visual keyboard layout (cols 0-14, no media keys)
 const LAYOUT_COLS: usize = 15;
@@ -22,11 +22,7 @@ const LAYOUT_ROWS: usize = 6;
 /// Delegates to `matrix::key_name()` and maps `"?"` to `""` for unused slots.
 pub fn get_key_name(index: u8) -> &'static str {
     let name = matrix::key_name(MatrixPos::new(index));
-    if name == "?" {
-        ""
-    } else {
-        name
-    }
+    if name == "?" { "" } else { name }
 }
 
 /// Render the keyboard layout

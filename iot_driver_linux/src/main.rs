@@ -18,7 +18,7 @@ use commands::CmdCtx;
 
 // gRPC server module
 mod grpc;
-use grpc::{dj_dev, DriverGrpcServer, DriverService};
+use grpc::{DriverGrpcServer, DriverService, dj_dev};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

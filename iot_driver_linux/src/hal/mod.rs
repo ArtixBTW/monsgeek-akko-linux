@@ -13,4 +13,4 @@ pub mod registry;
 // Re-export commonly used types
 pub use constants::*;
 pub use interface::{HidInterface, InterfaceType};
-pub use registry::{device_registry, DeviceRegistry};
+pub use registry::{DeviceRegistry, device_registry};

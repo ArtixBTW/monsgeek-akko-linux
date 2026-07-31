@@ -16,14 +16,14 @@ mod usb_urb;
 
 // Re-export from monsgeek_transport for convenience
 pub use monsgeek_transport::{OutputFormat, PacketFilter, Printer, PrinterConfig};
-pub use usb_urb::{parse_usb_packet, Direction, TransferType, UsbPacket};
+pub use usb_urb::{Direction, TransferType, UsbPacket, parse_usb_packet};
 
 use std::fs::File;
 use std::path::Path;
 use std::str::FromStr;
 
 use pcap_parser::pcapng::Block;
-use pcap_parser::{create_reader, PcapBlockOwned, PcapError};
+use pcap_parser::{PcapBlockOwned, PcapError, create_reader};
 
 use monsgeek_transport::event_parser::{parse_usb_event, report_id};
 
@@ -238,11 +238,11 @@ impl PcapAnalyzer {
                 // Check if it's a HID report or USB standard request
                 if setup.is_set_report() || setup.is_get_report() {
                     // HID report - extract and process
-                    if let Some(hid_data) = usb_urb::extract_hid_data(&packet) {
-                        if !hid_data.is_empty() {
-                            self.decode_and_print_with_stats(timestamp, hid_data, &packet, stats);
-                            return true;
-                        }
+                    if let Some(hid_data) = usb_urb::extract_hid_data(&packet)
+                        && !hid_data.is_empty()
+                    {
+                        self.decode_and_print_with_stats(timestamp, hid_data, &packet, stats);
+                        return true;
                     }
                 } else {
                     // Non-HID control transfer (GET_DESCRIPTOR, etc.)

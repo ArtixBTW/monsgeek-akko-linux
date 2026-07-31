@@ -380,10 +380,10 @@ pub mod pipewire_capture {
             .map_err(|e| format!("Failed to get response: {e}"))?;
 
         // Persist the (possibly new) restore token for next time.
-        if let Some(token) = response.restore_token() {
-            if Some(token) != saved_token.as_deref() {
-                Settings::update(|s| s.screencast_restore_token = Some(token.to_string()));
-            }
+        if let Some(token) = response.restore_token()
+            && Some(token) != saved_token.as_deref()
+        {
+            Settings::update(|s| s.screencast_restore_token = Some(token.to_string()));
         }
 
         let streams = response.streams();
@@ -462,11 +462,11 @@ pub mod pipewire_capture {
                 if id != ParamType::Format.as_raw() {
                     return;
                 }
-                if let Some(pod) = pod {
-                    if let Some((w, h)) = parse_video_format_size(pod) {
-                        *format_width_clone.borrow_mut() = w;
-                        *format_height_clone.borrow_mut() = h;
-                    }
+                if let Some(pod) = pod
+                    && let Some((w, h)) = parse_video_format_size(pod)
+                {
+                    *format_width_clone.borrow_mut() = w;
+                    *format_height_clone.borrow_mut() = h;
                 }
             })
             .process(move |stream, _| {
@@ -475,20 +475,15 @@ pub mod pipewire_capture {
                     let height = *format_height.borrow();
 
                     let datas = buffer.datas_mut();
-                    if !datas.is_empty() {
-                        if let Some(data) = datas[0].data() {
-                            if width > 0 && height > 0 {
-                                // Assume BGRx format (common)
-                                let (r, g, b) = compute_average_color(
-                                    data,
-                                    width,
-                                    height,
-                                    true,
-                                    state_clone.region(),
-                                );
-                                state_clone.set_color(r, g, b);
-                            }
-                        }
+                    if !datas.is_empty()
+                        && let Some(data) = datas[0].data()
+                        && width > 0
+                        && height > 0
+                    {
+                        // Assume BGRx format (common)
+                        let (r, g, b) =
+                            compute_average_color(data, width, height, true, state_clone.region());
+                        state_clone.set_color(r, g, b);
                     }
                 }
             })

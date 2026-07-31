@@ -8,7 +8,7 @@
 
 use crate::key_action::KeyAction;
 use crate::protocol::hid;
-use monsgeek_transport::protocol::{matrix, HidUsage, KeymatrixLayer, MatrixPos};
+use monsgeek_transport::protocol::{HidUsage, KeymatrixLayer, MatrixPos, matrix};
 
 use monsgeek_keyboard::{
     DksConfig, KeyMode, KeyboardError, KeyboardInterface, ModeByte, SNAPTAP_UNBOUND,
@@ -492,10 +492,11 @@ mod tests {
         assert_eq!(caps.fn_action, Some(KeyAction::Consumer(0x00E9)));
         assert!(caps.is_customized());
         // Empty Fn slots stay unbound rather than reading as a binding.
-        assert!(rows
-            .iter()
-            .filter(|r| r.index != MatrixPos::new(3))
-            .all(|r| r.fn_action.is_none()));
+        assert!(
+            rows.iter()
+                .filter(|r| r.index != MatrixPos::new(3))
+                .all(|r| r.fn_action.is_none())
+        );
     }
 
     /// The raw bytes are kept verbatim, since re-encoding moves a lone usage slot.

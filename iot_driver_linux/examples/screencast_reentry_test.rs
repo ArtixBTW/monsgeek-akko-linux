@@ -20,8 +20,8 @@
 //! Expected (buggy): attempt #1 succeeds in ~tens of ms; attempt #2 TIMES OUT.
 //! With the fix (shared persistent runtime): both succeed.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use ashpd::desktop::screencast::Screencast;

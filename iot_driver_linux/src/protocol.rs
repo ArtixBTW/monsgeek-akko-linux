@@ -466,11 +466,7 @@ pub mod polling_rate {
 
         // Plain number
         let hz: u16 = s.parse().ok()?;
-        if RATES.contains(&hz) {
-            Some(hz)
-        } else {
-            None
-        }
+        if RATES.contains(&hz) { Some(hz) } else { None }
     }
 
     #[cfg(test)]
@@ -1155,8 +1151,8 @@ pub mod audio_viz {
     pub fn build_report(bands: &[u8; NUM_BANDS]) -> [u8; 64] {
         let mut buf = [0u8; 64];
         buf[0] = super::cmd::SET_AUDIO_VIZ; // 0x0D
-                                            // Bytes 1-6 are padding (zeros)
-                                            // Byte 7 is checksum
+        // Bytes 1-6 are padding (zeros)
+        // Byte 7 is checksum
         let sum: u32 = buf[0..7].iter().map(|&b| b as u32).sum();
         buf[7] = (255 - (sum & 0xFF)) as u8;
         // Bytes 8-23 are the 16 frequency bands
@@ -1560,7 +1556,7 @@ pub mod screen_color {
 #[cfg(test)]
 mod index_space_tests {
     use super::hid;
-    use monsgeek_transport::protocol::{matrix, HidUsage, MatrixPos};
+    use monsgeek_transport::protocol::{HidUsage, MatrixPos, matrix};
 
     #[test]
     fn every_named_position_round_trips_through_the_matrix_table() {

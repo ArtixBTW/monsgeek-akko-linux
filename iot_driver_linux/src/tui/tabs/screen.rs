@@ -14,13 +14,13 @@
 #[cfg(feature = "screen-capture")]
 use std::time::{Duration, Instant};
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::symbols;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::canvas::{Canvas, Line as CanvasLine, Points};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use super::super::App;
 use crate::screen_calib::{ColorCalibration, Region};

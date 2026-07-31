@@ -1,7 +1,7 @@
 //! Keyboard interface error types
 
-use monsgeek_transport::command::KeyMatrixBoundsError;
 use monsgeek_transport::TransportError;
+use monsgeek_transport::command::KeyMatrixBoundsError;
 use thiserror::Error;
 
 /// Errors from keyboard operations

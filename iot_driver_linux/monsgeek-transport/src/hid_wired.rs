@@ -5,11 +5,11 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tracing::debug;
 
+use crate::Transport;
 use crate::error::TransportError;
-use crate::event_parser::{parse_usb_event, EventReaderConfig, EventSubsystem};
+use crate::event_parser::{EventReaderConfig, EventSubsystem, parse_usb_event};
 use crate::protocol::{self, REPORT_SIZE};
 use crate::types::{ChecksumType, TimestampedEvent, TransportDeviceInfo, VendorEvent};
-use crate::Transport;
 
 /// HID transport for wired USB connection
 ///

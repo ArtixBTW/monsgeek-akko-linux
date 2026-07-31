@@ -23,13 +23,10 @@ mod hid_wired;
 mod sync_adapter;
 
 pub use command::{
-    // Packet parsing
-    decode_magnetism_data,
-    // Speed conversion helpers
-    speed_from_wire,
-    speed_to_wire,
-    try_parse_command,
-    try_parse_response,
+    // LED constants
+    BRIGHTNESS_MAX,
+    DAZZLE_OFF,
+    DAZZLE_ON,
     DebounceResponse,
     // Dongle commands
     DongleIdResponse,
@@ -63,6 +60,7 @@ pub use command::{
     QueryVersion,
     RfInfoResponse,
     Rgb,
+    SPEED_MAX,
     SetCtrlByte,
     SetDebounce,
     // LED
@@ -74,14 +72,16 @@ pub use command::{
     SetProfile,
     SetSleepTime,
     SleepTimeResponse,
-    // LED constants
-    BRIGHTNESS_MAX,
-    DAZZLE_OFF,
-    DAZZLE_ON,
-    SPEED_MAX,
+    // Packet parsing
+    decode_magnetism_data,
+    // Speed conversion helpers
+    speed_from_wire,
+    speed_to_wire,
+    try_parse_command,
+    try_parse_response,
 };
 pub use device_registry::{
-    is_bluetooth_pid, is_dongle_pid, BLUETOOTH_PIDS, DONGLE_PIDS, VENDOR_ID,
+    BLUETOOTH_PIDS, DONGLE_PIDS, VENDOR_ID, is_bluetooth_pid, is_dongle_pid,
 };
 pub use error::TransportError;
 pub use printer::{
@@ -93,7 +93,7 @@ pub use types::{
     TimestampedEvent, TransportDeviceInfo, TransportType, VendorEvent,
 };
 
-pub use discovery::{format_device_list, DeviceDiscovery, HidDiscovery, ProbedDevice};
+pub use discovery::{DeviceDiscovery, HidDiscovery, ProbedDevice, format_device_list};
 pub use flow_control::FlowControlTransport;
 pub use hid_bluetooth::HidBluetoothTransport;
 pub use hid_dongle::HidDongleTransport;

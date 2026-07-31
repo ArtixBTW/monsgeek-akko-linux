@@ -13,20 +13,20 @@
 //! ```
 
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
+use crate::Transport;
 use crate::error::TransportError;
 use crate::protocol::{cmd, dongle_timing, timing};
 use crate::types::{
     ChecksumType, TimestampedEvent, TransportDeviceInfo, TransportType, VendorEvent,
 };
-use crate::Transport;
 
 // Re-export for consumers
 pub use crate::command::{HidCommand, HidResponse, ParseError};

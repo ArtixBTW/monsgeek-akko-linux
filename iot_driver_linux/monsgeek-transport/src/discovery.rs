@@ -11,6 +11,7 @@ fn is_bluetooth_bus(device_info: &hidapi::DeviceInfo) -> bool {
     matches!(device_info.bus_type(), hidapi::BusType::Bluetooth)
 }
 
+use crate::Transport;
 use crate::device_registry;
 use crate::error::TransportError;
 use crate::flow_control::FlowControlTransport;
@@ -20,7 +21,6 @@ use crate::hid_wired::HidWiredTransport;
 use crate::printer::{Printer, PrinterConfig};
 use crate::protocol::device;
 use crate::types::{DiscoveredDevice, DiscoveryEvent, TransportDeviceInfo, TransportType};
-use crate::Transport;
 
 /// Device discovery abstraction
 pub trait DeviceDiscovery: Send + Sync {
@@ -426,8 +426,8 @@ impl HidDiscovery {
     /// sorted by preference (Bluetooth > Dongle > Wired) with responsive
     /// devices first.
     pub fn probe_devices(&self) -> Result<Vec<ProbedDevice>, TransportError> {
-        use crate::protocol::cmd;
         use crate::ChecksumType;
+        use crate::protocol::cmd;
 
         let devices = self.list_devices()?;
         let mut probed = Vec::with_capacity(devices.len());

@@ -5,7 +5,7 @@
 //! with custom serde that serializes as bare key name strings (e.g. `"W"`)
 //! and accepts both the new format and the old `{ key_index, label }` format.
 
-use monsgeek_transport::protocol::{matrix, KeyRef, Layer, MatrixPos};
+use monsgeek_transport::protocol::{KeyRef, Layer, MatrixPos, matrix};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::path::PathBuf;
 

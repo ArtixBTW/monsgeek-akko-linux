@@ -1,11 +1,11 @@
 //! Reusable TUI widgets shared across tabs.
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{Block, Borders, Clear, List, ListItem, ListState},
-    Frame,
 };
 
 /// A modal, centered single-choice list selector over arbitrary values.
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(p.selected(), Some(&4)); // "Bravo"
         p.down();
         assert_eq!(p.selected(), Some(&4)); // saturates within the filtered rows
-                                            // No match → nothing selectable.
+        // No match → nothing selectable.
         p.push_filter('z');
         assert_eq!(p.selected(), None);
         // Backspacing restores the wider list.

@@ -5,7 +5,7 @@
 //! `index = col * 6 + row`. This module bridges the two.
 
 use crate::profile::M1_V5_HE_KEY_NAMES;
-use monsgeek_transport::protocol::{led_grid, LedPos, StripIdx};
+use monsgeek_transport::protocol::{LedPos, StripIdx, led_grid};
 
 /// LED grid dimensions, as `usize` for the indexing arithmetic in this module.
 pub const COLS: usize = led_grid::COLS as usize;
@@ -255,27 +255,27 @@ pub fn parse_key_target(s: &str) -> Result<KeyTarget, String> {
     }
 
     // row<N>
-    if let Some(n_s) = lower.strip_prefix("row") {
-        if let Ok(row) = n_s.parse::<usize>() {
-            if row < ROWS {
-                return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
-                    pos.row() as usize == row
-                })));
-            }
-            return Err(format!("row out of range: {row} (0-{max})", max = ROWS - 1));
+    if let Some(n_s) = lower.strip_prefix("row")
+        && let Ok(row) = n_s.parse::<usize>()
+    {
+        if row < ROWS {
+            return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
+                pos.row() as usize == row
+            })));
         }
+        return Err(format!("row out of range: {row} (0-{max})", max = ROWS - 1));
     }
 
     // col<N>
-    if let Some(n_s) = lower.strip_prefix("col") {
-        if let Ok(col) = n_s.parse::<usize>() {
-            if col < COLS {
-                return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
-                    pos.col() as usize == col
-                })));
-            }
-            return Err(format!("col out of range: {col} (0-{max})", max = COLS - 1));
+    if let Some(n_s) = lower.strip_prefix("col")
+        && let Ok(col) = n_s.parse::<usize>()
+    {
+        if col < COLS {
+            return Ok(KeyTarget::from_sorted(keys_matching(|pos, _| {
+                pos.col() as usize == col
+            })));
         }
+        return Err(format!("col out of range: {col} (0-{max})", max = COLS - 1));
     }
 
     // --- Range selectors (contain "..") ---
@@ -374,12 +374,12 @@ fn parse_text_target(text: &str) -> Result<KeyTarget, String> {
             continue;
         }
 
-        if let Some(key_name) = char_to_key_name(ch) {
-            if let Some((row, col)) = key_name_to_pos(key_name) {
-                // Allow duplicates — repeated keys are split into timed sends
-                indices.push(logical_to_led_pos(row, col));
-                slots.push(slot);
-            }
+        if let Some(key_name) = char_to_key_name(ch)
+            && let Some((row, col)) = key_name_to_pos(key_name)
+        {
+            // Allow duplicates — repeated keys are split into timed sends
+            indices.push(logical_to_led_pos(row, col));
+            slots.push(slot);
         }
         // Unknown chars are silently skipped (no slot advance)
         slot += 1;
@@ -577,7 +577,7 @@ mod tests {
         let target = parse_key_target("text:HI THERE").unwrap();
         // H=slot0, I=slot1, space=slot2(skip), T=slot3, H=skip(dupe), E=slot5, R=slot6, E=skip(dupe)
         assert!(target.indices.len() >= 5); // H, I, T, E, R (at minimum)
-                                            // First key (H) at slot 0
+        // First key (H) at slot 0
         assert_eq!(target.slots[0], 0);
         // After space, slots jump
         let t_pos = target.indices.iter().position(|&idx| {

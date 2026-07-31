@@ -96,13 +96,13 @@ impl Rgb {
 
     /// Parse a color string: "#RRGGBB", "red", "green", etc.
     pub fn parse(s: &str) -> Option<Self> {
-        if let Some(hex) = s.strip_prefix('#') {
-            if hex.len() == 6 {
-                let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-                let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-                let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-                return Some(Self::new(r, g, b));
-            }
+        if let Some(hex) = s.strip_prefix('#')
+            && hex.len() == 6
+        {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            return Some(Self::new(r, g, b));
         }
         match s.to_ascii_lowercase().as_str() {
             "red" => Some(Self::new(255, 0, 0)),
@@ -567,23 +567,23 @@ fn push_var(vars: &mut Vec<String>, name: &str) {
 /// Variables with defaults are included since they can still be overridden.
 pub fn required_variables(def: &EffectDef) -> Vec<String> {
     let mut vars = Vec::new();
-    if let Some(ref c) = def.color {
-        if let Some(var_ref) = c.strip_prefix('$') {
-            push_var(&mut vars, var_name_from_ref(var_ref));
-        }
+    if let Some(ref c) = def.color
+        && let Some(var_ref) = c.strip_prefix('$')
+    {
+        push_var(&mut vars, var_name_from_ref(var_ref));
     }
     for kf in &def.keyframes {
-        if let Some(ref c) = kf.color {
-            if let Some(var_ref) = c.strip_prefix('$') {
-                push_var(&mut vars, var_name_from_ref(var_ref));
-            }
+        if let Some(ref c) = kf.color
+            && let Some(var_ref) = c.strip_prefix('$')
+        {
+            push_var(&mut vars, var_name_from_ref(var_ref));
         }
         // Check timing variables
         for nov in [&kf.t, &kf.d].into_iter().flatten() {
-            if let NumOrVar::Var(s) = nov {
-                if let Some(var_ref) = s.strip_prefix('$') {
-                    push_var(&mut vars, var_name_from_ref(var_ref));
-                }
+            if let NumOrVar::Var(s) = nov
+                && let Some(var_ref) = s.strip_prefix('$')
+            {
+                push_var(&mut vars, var_name_from_ref(var_ref));
             }
         }
     }

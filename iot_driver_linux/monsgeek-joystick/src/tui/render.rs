@@ -4,11 +4,11 @@ use crate::config::{AxisConfig, AxisMappingMode};
 use crate::joystick::{AXIS_MAX, AXIS_MIN};
 use crate::tui::app::{App, AppMode, JoystickStatus, KeyboardStatus, SelectedElement};
 use crate::tui::keyboard_layout::render_keyboard_layout;
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
-use ratatui::Frame;
 
 /// Render the entire application UI
 pub fn render(frame: &mut Frame, app: &App) {

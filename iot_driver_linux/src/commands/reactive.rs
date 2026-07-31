@@ -1,6 +1,6 @@
 //! Reactive mode command handlers (audio, screen).
 
-use super::{setup_interrupt_handler, CmdCtx, CommandResult};
+use super::{CmdCtx, CommandResult, setup_interrupt_handler};
 
 /// Run audio reactive LED mode
 pub fn audio(

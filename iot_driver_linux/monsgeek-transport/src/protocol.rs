@@ -670,11 +670,7 @@ impl KeymatrixLayer {
     /// The `n`th DKS binding of a key. Same wire value as the sub-layer of the
     /// same number — the firmware reinterprets, it does not relocate.
     pub const fn dks_slot(n: u8) -> Option<Self> {
-        if n < Self::COUNT {
-            Some(Self(n))
-        } else {
-            None
-        }
+        if n < Self::COUNT { Some(Self(n)) } else { None }
     }
 
     pub const fn get(self) -> u8 {
@@ -1197,7 +1193,7 @@ pub fn build_ble_command(cmd: u8, data: &[u8], checksum_type: ChecksumType) -> V
 /// between them without `STRIP_TO_LED_GRID`, so these pin the table.
 #[cfg(test)]
 mod led_index_space_tests {
-    use super::{led_grid, LedPos, StripIdx, STRIP_TO_LED_GRID};
+    use super::{LedPos, STRIP_TO_LED_GRID, StripIdx, led_grid};
     use std::collections::HashSet;
 
     #[test]

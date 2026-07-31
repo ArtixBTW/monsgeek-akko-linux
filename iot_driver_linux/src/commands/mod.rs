@@ -35,8 +35,8 @@ use iot_driver::protocol::{self, cmd};
 use monsgeek_keyboard::settings::FirmwareVersion;
 use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::{
-    format_device_list, DeviceDiscovery, FlowControlTransport, HidDiscovery, PacketFilter,
-    PrinterConfig, Transport,
+    DeviceDiscovery, FlowControlTransport, HidDiscovery, PacketFilter, PrinterConfig, Transport,
+    format_device_list,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -230,10 +230,10 @@ pub fn open_keyboard(
     kb.set_active_profile(profile);
 
     // Set non-analog positions from matrix database (encoder/GPIO keys).
-    if let Some(matrix) = matrix_db {
-        if let Some(positions) = &matrix.non_analog_positions {
-            kb.set_non_analog_positions(positions.clone());
-        }
+    if let Some(matrix) = matrix_db
+        && let Some(positions) = &matrix.non_analog_positions
+    {
+        kb.set_non_analog_positions(positions.clone());
     }
 
     Ok(kb)

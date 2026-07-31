@@ -15,7 +15,7 @@
 //! - Sweep test:     iterates all 96 positions; gaps produce no visible LED
 //!   (the sweep "disappears" at gap positions, which is expected)
 
-use super::{open_keyboard, setup_interrupt_handler, CmdCtx, CommandResult};
+use super::{CmdCtx, CommandResult, open_keyboard, setup_interrupt_handler};
 use monsgeek_keyboard::KeyboardInterface;
 use std::sync::atomic::Ordering;
 
@@ -208,11 +208,7 @@ pub fn stream_gif(
         } else {
             // GIF delay is in centiseconds; 0 means "use default" (100ms is common)
             let d = frame.delay as u64 * 10;
-            if d == 0 {
-                100
-            } else {
-                d
-            }
+            if d == 0 { 100 } else { d }
         };
 
         let mut leds = [(0u8, 0u8, 0u8); MATRIX_LEN];

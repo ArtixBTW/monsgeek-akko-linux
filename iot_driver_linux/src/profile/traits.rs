@@ -62,7 +62,7 @@ pub trait DeviceProfile: Send + Sync {
         self.matrix_defaults()
             .iter()
             .enumerate()
-            .filter(|(_, &hid)| hid != 0)
+            .filter(|&(_, &hid)| hid != 0)
             .map(|(pos, &hid)| (pos, hid))
             .collect()
     }

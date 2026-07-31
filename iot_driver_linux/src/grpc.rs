@@ -6,17 +6,17 @@
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use futures::{Stream, StreamExt};
-use tokio::sync::{broadcast, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, broadcast};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_udev::{EventType, MonitorBuilder};
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, warn};
 
-use crate::commands::led_stream::{apply_power_budget, send_full_frame, MATRIX_LEN};
+use crate::commands::led_stream::{MATRIX_LEN, apply_power_budget, send_full_frame};
 use iot_driver::effect::{self, EffectLibrary};
 use iot_driver::hal::HidInterface;
 use monsgeek_keyboard::KeyboardInterface;
@@ -279,11 +279,11 @@ impl DriverService {
 
                     // Add receivers for new devices
                     for (path, connected) in devices_guard.iter() {
-                        if !receivers.contains_key(path) {
-                            if let Some(rx) = connected.transport.subscribe_events() {
-                                debug!("Subscribed to events for device {}", path);
-                                receivers.insert(path.clone(), rx);
-                            }
+                        if !receivers.contains_key(path)
+                            && let Some(rx) = connected.transport.subscribe_events()
+                        {
+                            debug!("Subscribed to events for device {}", path);
+                            receivers.insert(path.clone(), rx);
                         }
                     }
                 }
@@ -584,8 +584,8 @@ impl DriverService {
     /// Uses FlowControlTransport which properly handles dongle SPI round-trips
     /// (send → flush → poll for echoed response).
     async fn query_device_id_static(transport: &Arc<dyn Transport>) -> Option<i32> {
-        use monsgeek_transport::protocol::cmd;
         use monsgeek_transport::FlowControlTransport;
+        use monsgeek_transport::protocol::cmd;
 
         let transport = transport.clone();
         tokio::task::spawn_blocking(move || {
@@ -1338,10 +1338,11 @@ impl DriverGrpc for DriverService {
                 let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
 
                 // Check TTL
-                if let Some(ttl) = def.ttl_ms {
-                    if ttl > 0 && elapsed_ms > ttl as f64 {
-                        break;
-                    }
+                if let Some(ttl) = def.ttl_ms
+                    && ttl > 0
+                    && elapsed_ms > ttl as f64
+                {
+                    break;
                 }
 
                 let rgb = resolved.evaluate(elapsed_ms);

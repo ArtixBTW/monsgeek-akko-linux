@@ -177,10 +177,10 @@ impl App {
             }
             SelectedElement::AxisProperty(axis_idx, prop) => {
                 let props = axis_properties();
-                if let Some(i) = props.iter().position(|p| p == prop) {
-                    if i + 1 < props.len() {
-                        self.selected = SelectedElement::AxisProperty(*axis_idx, props[i + 1]);
-                    }
+                if let Some(i) = props.iter().position(|p| p == prop)
+                    && i + 1 < props.len()
+                {
+                    self.selected = SelectedElement::AxisProperty(*axis_idx, props[i + 1]);
                 }
             }
             SelectedElement::KeyboardKey => {}
@@ -221,33 +221,32 @@ impl App {
 
     /// Toggle current boolean property or cycle enum
     pub fn toggle_current(&mut self) {
-        if let SelectedElement::AxisProperty(idx, prop) = self.selected {
-            if let Some(axis) = self.config.axes.get_mut(idx) {
-                if prop == AxisProperty::Enabled {
-                    axis.enabled = !axis.enabled;
-                    self.mark_dirty();
-                }
-            }
+        if let SelectedElement::AxisProperty(idx, prop) = self.selected
+            && let Some(axis) = self.config.axes.get_mut(idx)
+            && prop == AxisProperty::Enabled
+        {
+            axis.enabled = !axis.enabled;
+            self.mark_dirty();
         }
     }
 
     /// Adjust current numeric property
     pub fn adjust_current(&mut self, delta: f32) {
-        if let SelectedElement::AxisProperty(idx, prop) = self.selected {
-            if let Some(axis) = self.config.axes.get_mut(idx) {
-                match prop {
-                    AxisProperty::Deadzone => {
-                        axis.calibration.deadzone_percent =
-                            (axis.calibration.deadzone_percent + delta).clamp(0.0, 50.0);
-                        self.mark_dirty();
-                    }
-                    AxisProperty::Curve => {
-                        axis.calibration.curve_exponent =
-                            (axis.calibration.curve_exponent + delta * 0.1).clamp(0.5, 3.0);
-                        self.mark_dirty();
-                    }
-                    _ => {}
+        if let SelectedElement::AxisProperty(idx, prop) = self.selected
+            && let Some(axis) = self.config.axes.get_mut(idx)
+        {
+            match prop {
+                AxisProperty::Deadzone => {
+                    axis.calibration.deadzone_percent =
+                        (axis.calibration.deadzone_percent + delta).clamp(0.0, 50.0);
+                    self.mark_dirty();
                 }
+                AxisProperty::Curve => {
+                    axis.calibration.curve_exponent =
+                        (axis.calibration.curve_exponent + delta * 0.1).clamp(0.5, 3.0);
+                    self.mark_dirty();
+                }
+                _ => {}
             }
         }
     }

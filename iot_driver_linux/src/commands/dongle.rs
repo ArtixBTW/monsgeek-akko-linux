@@ -1,6 +1,6 @@
 //! Dongle-specific command handlers.
 
-use super::{open_preferred_transport, CmdCtx, CommandResult};
+use super::{CmdCtx, CommandResult, open_preferred_transport};
 use monsgeek_transport::{ChecksumType, FlowControlTransport, Transport, TransportType};
 use std::sync::Arc;
 

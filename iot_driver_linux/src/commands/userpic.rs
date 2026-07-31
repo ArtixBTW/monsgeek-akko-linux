@@ -4,7 +4,7 @@
 //! 5 slots (0-4) at 384 bytes each, column-major layout:
 //! pixel (col, row) at offset `col * 18 + row * 3`.
 
-use super::{open_keyboard, CmdCtx, CommandResult};
+use super::{CmdCtx, CommandResult, open_keyboard};
 use image::imageops::FilterType;
 use image::{GenericImageView, RgbImage};
 

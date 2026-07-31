@@ -7,9 +7,9 @@
 use anyhow::Result;
 use clap::Parser;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use futures::StreamExt;
 use ratatui::prelude::*;
@@ -28,7 +28,7 @@ use monsgeek_joystick::tui::render;
 
 use monsgeek_keyboard::KeyboardInterface;
 use monsgeek_transport::{
-    list_devices_sync, open_device_sync, TimestampedEvent, Transport, VendorEvent,
+    TimestampedEvent, Transport, VendorEvent, list_devices_sync, open_device_sync,
 };
 
 #[derive(Parser)]
@@ -322,11 +322,10 @@ async fn run_tui(config: JoystickConfig, config_path: PathBuf) -> Result<()> {
         tokio::select! {
             // Terminal events
             event = events.next() => {
-                if let Some(Ok(event)) = event {
-                    if handle_event(&mut app, event)? {
+                if let Some(Ok(event)) = event
+                    && handle_event(&mut app, event)? {
                         break;
                     }
-                }
             }
 
             // Keyboard depth events - low-latency broadcast channel with coalescing
@@ -354,11 +353,10 @@ async fn run_tui(config: JoystickConfig, config_path: PathBuf) -> Result<()> {
                 }
 
                 // Drain remaining events (coalesce depth by key)
-                if !channel_closed {
-                    if let Some(ref mut rx) = event_rx {
+                if !channel_closed
+                    && let Some(ref mut rx) = event_rx {
                         channel_closed = drain_depth_events(rx, &mut pending_depths);
                     }
-                }
 
                 // Apply coalesced depth events
                 if !pending_depths.is_empty() {

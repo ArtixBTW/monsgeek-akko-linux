@@ -456,14 +456,14 @@ fn run_input_notify_test(duration_secs: u64, interval_ms: u64) -> anyhow::Result
 
             // Before command - quick poll
             let mut buf = vec![0u8; 64];
-            if let Ok(len) = devices.input.read_timeout(&mut buf, 1) {
-                if len > 0 {
-                    events.push(InputEvent {
-                        timestamp_secs: start.elapsed().as_secs_f32(),
-                        data: buf[..len].to_vec(),
-                        context: "before_cmd".to_string(),
-                    });
-                }
+            if let Ok(len) = devices.input.read_timeout(&mut buf, 1)
+                && len > 0
+            {
+                events.push(InputEvent {
+                    timestamp_secs: start.elapsed().as_secs_f32(),
+                    data: buf[..len].to_vec(),
+                    context: "before_cmd".to_string(),
+                });
             }
 
             // Send command
@@ -474,21 +474,21 @@ fn run_input_notify_test(duration_secs: u64, interval_ms: u64) -> anyhow::Result
                 // Check input immediately after send
                 let mut buf = vec![0u8; 64];
                 for _ in 0..5 {
-                    if let Ok(len) = devices.input.read_timeout(&mut buf, 5) {
-                        if len > 0 {
-                            let elapsed = start.elapsed().as_secs_f32();
-                            events.push(InputEvent {
-                                timestamp_secs: elapsed,
-                                data: buf[..len].to_vec(),
-                                context: format!("after_send_0x{:02X}", cmd),
-                            });
-                            println!(
-                                "[{:6.2}s] Event after cmd 0x{:02X}: {:02X?}",
-                                elapsed,
-                                cmd,
-                                &buf[..len.min(16)]
-                            );
-                        }
+                    if let Ok(len) = devices.input.read_timeout(&mut buf, 5)
+                        && len > 0
+                    {
+                        let elapsed = start.elapsed().as_secs_f32();
+                        events.push(InputEvent {
+                            timestamp_secs: elapsed,
+                            data: buf[..len].to_vec(),
+                            context: format!("after_send_0x{:02X}", cmd),
+                        });
+                        println!(
+                            "[{:6.2}s] Event after cmd 0x{:02X}: {:02X?}",
+                            elapsed,
+                            cmd,
+                            &buf[..len.min(16)]
+                        );
                     }
                 }
 
@@ -505,14 +505,14 @@ fn run_input_notify_test(duration_secs: u64, interval_ms: u64) -> anyhow::Result
 
                 // Check input after flush/read
                 let mut buf = vec![0u8; 64];
-                if let Ok(len) = devices.input.read_timeout(&mut buf, 5) {
-                    if len > 0 {
-                        events.push(InputEvent {
-                            timestamp_secs: start.elapsed().as_secs_f32(),
-                            data: buf[..len].to_vec(),
-                            context: format!("after_read_0x{:02X}", cmd),
-                        });
-                    }
+                if let Ok(len) = devices.input.read_timeout(&mut buf, 5)
+                    && len > 0
+                {
+                    events.push(InputEvent {
+                        timestamp_secs: start.elapsed().as_secs_f32(),
+                        data: buf[..len].to_vec(),
+                        context: format!("after_read_0x{:02X}", cmd),
+                    });
                 }
             }
 
@@ -752,13 +752,18 @@ fn run_poll_test(iterations: u32, max_polls: u32) -> anyhow::Result<()> {
                 0
             };
 
-            println!("0x{:02X} {:<14} | success: {:3}/{:3} | latency: avg={:6.2}ms min={:6.2}ms max={:6.2}ms p50={:6.2}ms p95={:6.2}ms",
-                cmd, name, successes, iterations,
+            println!(
+                "0x{:02X} {:<14} | success: {:3}/{:3} | latency: avg={:6.2}ms min={:6.2}ms max={:6.2}ms p50={:6.2}ms p95={:6.2}ms",
+                cmd,
+                name,
+                successes,
+                iterations,
                 avg_latency as f64 / 1000.0,
                 min_latency as f64 / 1000.0,
                 max_latency as f64 / 1000.0,
                 p50_latency as f64 / 1000.0,
-                p95_latency as f64 / 1000.0);
+                p95_latency as f64 / 1000.0
+            );
             println!(
                 "                  | polls: avg={:.1} min={} max={} | per_poll: {:.2}ms",
                 avg_polls,
@@ -1231,7 +1236,7 @@ fn run_set_response_debug() -> anyhow::Result<()> {
     set_buf[6] = params[6]; // g
     set_buf[7] = params[7]; // b
     set_buf[8] = params[8]; // direction
-                            // Checksum
+    // Checksum
     let sum: u32 = set_buf[1..8].iter().map(|&b| b as u32).sum();
     set_buf[8] = (255 - (sum & 0xFF)) as u8;
 

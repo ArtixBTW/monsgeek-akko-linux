@@ -9,9 +9,9 @@
 //! which uses a different position numbering.
 
 use iot_driver::key_action::KeyAction;
-use iot_driver::keymap::{is_user_remap as shared_is_user_remap, KeyRef, Layer};
+use iot_driver::keymap::{KeyRef, Layer, is_user_remap as shared_is_user_remap};
 use iot_driver::protocol::hid;
-use monsgeek_transport::protocol::{matrix, HidUsage, MatrixPos};
+use monsgeek_transport::protocol::{HidUsage, MatrixPos, matrix};
 
 /// Helper: detect whether a 4-byte key config represents a user remap.
 /// Mirrors the logic in `commands::keymap::list_remaps` and `tui::load_remaps`.
@@ -146,7 +146,7 @@ fn default_for_matches_transport_matrix() {
     assert_eq!(default_for(3), HidUsage::new(0x39)); // Caps
     assert_eq!(default_for(4), HidUsage::new(0xE1)); // LShf
     assert_eq!(default_for(5), HidUsage::new(0xE0)); // LCtl
-                                                     // F-row and modifier positions (verified against firmware GET_KEYMATRIX)
+    // F-row and modifier positions (verified against firmware GET_KEYMATRIX)
     assert_eq!(default_for(6), HidUsage::new(0x3A)); // F1 at Col 1 Row 0
     assert_eq!(default_for(11), HidUsage::new(0xE3)); // Win at Col 1 Row 5
     assert_eq!(default_for(12), HidUsage::new(0x3B)); // F2 at Col 2 Row 0

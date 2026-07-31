@@ -4,8 +4,8 @@
 //! backends (wired, dongle, bluetooth). The keyboard sends notifications via
 //! HID input reports when settings change (Fn key combos, profile changes, etc.)
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use hidapi::HidDevice;

@@ -81,12 +81,12 @@ pub struct AnimStatus {
 // Re-export VendorEvent and TimestampedEvent for use by consumers (TUI notification handling)
 pub use monsgeek_transport::{TimestampedEvent, VendorEvent};
 
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use monsgeek_transport::protocol::{
-    cmd, magnetism as mag_cmd, CommandTable, DefId, KeymatrixLayer, Layer, LedPos, MacroSlot,
-    Profile, StripIdx,
+    CommandTable, DefId, KeymatrixLayer, Layer, LedPos, MacroSlot, Profile, StripIdx, cmd,
+    magnetism as mag_cmd,
 };
 use monsgeek_transport::{ChecksumType, FlowControlTransport, Transport};
 // Typed commands
@@ -575,10 +575,10 @@ impl KeyboardInterface {
     /// instead of calling get_feature_list() or get_version() directly for precision.
     pub fn get_precision(&self) -> Result<settings::Precision, KeyboardError> {
         // Try feature list first
-        if let Ok(features) = self.get_feature_list() {
-            if let Some(precision) = features.precision() {
-                return Ok(precision);
-            }
+        if let Ok(features) = self.get_feature_list()
+            && let Some(precision) = features.precision()
+        {
+            return Ok(precision);
         }
 
         // Fall back to firmware version

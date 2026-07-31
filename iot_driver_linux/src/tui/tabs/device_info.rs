@@ -9,14 +9,14 @@ use crate::hid::BatteryInfo;
 use crate::power_supply::{find_dongle_battery_power_supply, read_kernel_battery};
 use monsgeek_keyboard::KeyboardOptions as KbOptions;
 use monsgeek_keyboard::{
-    led::{speed_from_wire, speed_to_wire},
     LedMode, LedParams, RgbColor, SleepTimeSettings,
+    led::{speed_from_wire, speed_to_wire},
 };
-use monsgeek_transport::protocol::Profile;
 use monsgeek_transport::Transport;
+use monsgeek_transport::protocol::Profile;
 
-use crate::tui::shared::{AsyncResult, BatterySource, LoadState, PatchInfoData, SleepField};
 use crate::tui::App;
+use crate::tui::shared::{AsyncResult, BatterySource, LoadState, PatchInfoData, SleepField};
 
 /// Which color is being edited with hex input
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -344,7 +344,7 @@ impl App {
         self.status_msg = "Checking for firmware updates...".to_string();
 
         tokio::spawn(async move {
-            use crate::firmware_api::{check_firmware, ApiError};
+            use crate::firmware_api::{ApiError, check_firmware};
 
             let result = match check_firmware(device_id).await {
                 Ok(response) => FirmwareCheckResult::from_response(&response, local_version),
@@ -406,14 +406,14 @@ impl App {
             .unwrap_or(rates.len() - 1);
         let new_idx = (current_idx as i32 + delta).clamp(0, rates.len() as i32 - 1) as usize;
         let new_hz = rates[new_idx];
-        if let Some(rate_enum) = monsgeek_keyboard::PollingRate::from_hz(new_hz) {
-            if let Some(ref keyboard) = self.keyboard {
-                if keyboard.set_polling_rate(rate_enum).is_ok() {
-                    self.info.polling_rate = new_hz;
-                    self.status_msg = format!("Polling rate: {}", polling_rate::name(new_hz));
-                } else {
-                    self.status_msg = "Failed to set polling rate".to_string();
-                }
+        if let Some(rate_enum) = monsgeek_keyboard::PollingRate::from_hz(new_hz)
+            && let Some(ref keyboard) = self.keyboard
+        {
+            if keyboard.set_polling_rate(rate_enum).is_ok() {
+                self.info.polling_rate = new_hz;
+                self.status_msg = format!("Polling rate: {}", polling_rate::name(new_hz));
+            } else {
+                self.status_msg = "Failed to set polling rate".to_string();
             }
         }
     }
@@ -640,20 +640,20 @@ impl App {
     }
 
     fn save_options(&mut self) {
-        if let Some(ref opts) = self.options {
-            if let Some(ref keyboard) = self.keyboard {
-                let kb_opts = KbOptions {
-                    os_mode: opts.os_mode,
-                    fn_layer: opts.fn_layer,
-                    anti_mistouch: opts.anti_mistouch,
-                    rt_stability: opts.rt_stability,
-                    wasd_swap: opts.wasd_swap,
-                };
-                if keyboard.set_kb_options(&kb_opts).is_ok() {
-                    self.status_msg = "Options saved".to_string();
-                } else {
-                    self.status_msg = "Failed to save options".to_string();
-                }
+        if let Some(ref opts) = self.options
+            && let Some(ref keyboard) = self.keyboard
+        {
+            let kb_opts = KbOptions {
+                os_mode: opts.os_mode,
+                fn_layer: opts.fn_layer,
+                anti_mistouch: opts.anti_mistouch,
+                rt_stability: opts.rt_stability,
+                wasd_swap: opts.wasd_swap,
+            };
+            if keyboard.set_kb_options(&kb_opts).is_ok() {
+                self.status_msg = "Options saved".to_string();
+            } else {
+                self.status_msg = "Failed to save options".to_string();
             }
         }
     }

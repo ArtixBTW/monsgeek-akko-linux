@@ -1,7 +1,7 @@
 //! Utility command handlers.
 
-use super::{format_command_response, open_preferred_transport, CmdCtx, CommandResult};
-use monsgeek_transport::{format_device_list, ChecksumType, HidDiscovery, Transport};
+use super::{CmdCtx, CommandResult, format_command_response, open_preferred_transport};
+use monsgeek_transport::{ChecksumType, HidDiscovery, Transport, format_device_list};
 
 /// List supported devices with probe results (replaces raw HID dump)
 pub fn list() -> CommandResult {

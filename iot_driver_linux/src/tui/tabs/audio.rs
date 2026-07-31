@@ -6,18 +6,18 @@
 //! only extra controls are the capture **Source** and the visualizer **Style**;
 //! they (and the level meter) appear only while a music mode is selected.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use super::super::App;
-use crate::audio_reactive::{run_viz_loop, AudioCapture, AudioConfig};
+use crate::audio_reactive::{AudioCapture, AudioConfig, run_viz_loop};
 use crate::pulse::{self, SourceEntry};
 
 const MUSIC_BARS: u8 = 22;
@@ -33,11 +33,7 @@ pub(in crate::tui) fn is_music_mode(led_mode: u8) -> bool {
 /// same renderer with exactly 3 styles (0,1,2); the option byte's upper nibble
 /// above 2 is ignored.
 fn style_max(led_mode: u8) -> u8 {
-    if is_music_mode(led_mode) {
-        2
-    } else {
-        0
-    }
+    if is_music_mode(led_mode) { 2 } else { 0 }
 }
 
 /// A live audio-reactive run: capture threads + the visualizer streaming thread.
