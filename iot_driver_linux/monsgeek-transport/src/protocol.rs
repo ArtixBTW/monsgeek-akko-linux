@@ -806,10 +806,19 @@ impl KeyRef {
 
 impl fmt::Display for KeyRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.layer {
-            Layer::Base => write!(f, "{}", self.position),
-            Layer::Layer1 => write!(f, "L1+{}", self.position),
-            Layer::Fn => write!(f, "Fn+{}", self.position),
+        let prefix = match self.layer {
+            Layer::Base => "",
+            Layer::Layer1 => "L1+",
+            Layer::Fn => "Fn+",
+        };
+        // "?" is the table's no-name marker and cannot be typed back in. Show the
+        // position instead, in the same `#N` form the keymatrix listing uses and
+        // `resolve_key` accepts — so anything printed here can be pasted into a
+        // `remap`.
+        if self.position == "?" {
+            write!(f, "{prefix}#{}", self.index.get())
+        } else {
+            write!(f, "{prefix}{}", self.position)
         }
     }
 }
@@ -861,6 +870,14 @@ fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 
 /// Resolve a key name or numeric index to a matrix position.
 pub fn resolve_key(key: &str) -> Result<MatrixPos, String> {
+    // `#N` is unambiguously a matrix position — the same spelling `--keys` uses,
+    // and the only way to name a position the tables have no name for.
+    if let Some(n) = key.strip_prefix('#') {
+        return n
+            .parse::<u8>()
+            .map(MatrixPos::new)
+            .map_err(|_| format!("invalid matrix position: \"{key}\""));
+    }
     // Try numeric index first
     if let Ok(idx) = key.parse::<u8>() {
         return Ok(MatrixPos::new(idx));
@@ -870,7 +887,7 @@ pub fn resolve_key(key: &str) -> Result<MatrixPos, String> {
         return Ok(idx);
     }
     Err(format!(
-        "unknown key: \"{key}\". Use a matrix index (0-95) or name like F3, Esc, Tab"
+        "unknown key: \"{key}\". Use a matrix position (42 or #42) or a name like F3, Esc, Tab"
     ))
 }
 

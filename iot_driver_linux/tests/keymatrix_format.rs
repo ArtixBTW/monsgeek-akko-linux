@@ -818,3 +818,40 @@ fn keyref_roundtrip() {
         assert_eq!(kr, kr2, "roundtrip failed for {s}");
     }
 }
+
+// ── `#N` positions are spelled the same everywhere ──
+
+/// `--keys` has always taken `#N` for a matrix position; `remap`/`reset-key` did
+/// not, so a position the name tables cannot name was listed but not editable.
+#[test]
+fn keyref_accepts_the_hash_position_form() {
+    let bare: KeyRef = "42".parse().unwrap();
+    let hashed: KeyRef = "#42".parse().unwrap();
+    assert_eq!(bare.index, hashed.index);
+    assert_eq!(hashed.index, MatrixPos::new(42));
+
+    // And with a layer prefix, since that is how the listing shows overlay rows.
+    let fn_hashed: KeyRef = "Fn+#92".parse().unwrap();
+    assert_eq!(fn_hashed.index, MatrixPos::new(92));
+    assert_eq!(fn_hashed.layer, Layer::Fn);
+
+    assert!("#not-a-number".parse::<KeyRef>().is_err());
+}
+
+/// A `KeyRef` for a position the tables do not name must print something that
+/// parses back — it used to print "?", which nothing accepts.
+#[test]
+fn unnamed_keyref_prints_a_form_that_parses_back() {
+    for (pos, layer, want) in [
+        (92u8, Layer::Base, "#92"),
+        (92, Layer::Fn, "Fn+#92"),
+        (92, Layer::Layer1, "L1+#92"),
+        (3, Layer::Base, "Caps"),
+    ] {
+        let kr = KeyRef::new(MatrixPos::new(pos), layer);
+        assert_eq!(kr.to_string(), want);
+        let back: KeyRef = kr.to_string().parse().unwrap();
+        assert_eq!(back.index, kr.index);
+        assert_eq!(back.layer, kr.layer);
+    }
+}
