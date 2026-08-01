@@ -277,6 +277,33 @@ impl KeyAction {
     }
 }
 
+/// Parameterless SPECIAL_FN actions, by sub-function id.
+///
+/// Shared by `Display` and `FromStr` so the two cannot drift. A name that prints
+/// but does not parse makes `remap` a one-way door: the binding can be read off
+/// the device and shown, then never written back.
+const SPECIAL_FN_NAMES: &[(u8, &str)] = &[
+    (special_fn::GAME_MODE, "Game Mode"),
+    (special_fn::WIN_LOCK, "Win Lock"),
+    (special_fn::BT_PAIRING, "BT Pairing"),
+    (special_fn::FN_TOGGLE, "Fn Toggle"),
+    (special_fn::WASD_SWAP, "WASD Swap"),
+    (special_fn::NKRO_TOGGLE, "NKRO Toggle"),
+    (special_fn::FN_LOCK, "Fn Lock"),
+    (special_fn::REPORT_MODE, "Report Mode"),
+    (special_fn::KNOB_MODE_TOGGLE, "Knob Mode Toggle"),
+    (special_fn::RCTRL_MOD, "RCtrl Modifier"),
+];
+
+/// LED_CONTROL actions whose three payload bytes are fixed, by those bytes.
+/// Shared by `Display` and `FromStr` for the same reason.
+const LED_CONTROL_NAMES: &[([u8; 3], &str)] = &[
+    ([2, 1, 0], "LED Brightness Up"),
+    ([2, 2, 0], "LED Brightness Down"),
+    ([3, 1, 0], "LED Speed Up"),
+    ([3, 2, 0], "LED Speed Down"),
+];
+
 impl fmt::Display for KeyAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -307,27 +334,19 @@ impl fmt::Display for KeyAction {
             KeyAction::Gamepad(btn) => write!(f, "Gamepad({btn})"),
             KeyAction::Fn => write!(f, "Fn"),
             KeyAction::SpecialFn { sub, b2, b3 } => {
-                let name = match *sub {
-                    special_fn::GAME_MODE => "Game Mode",
-                    special_fn::WIN_LOCK => "Win Lock",
-                    special_fn::OS_MODE => match b2 {
-                        0 => "OS: Windows",
-                        1 => "OS: Mac",
-                        2 => "OS: iOS",
-                        3 => "OS: Cycle",
-                        _ => return write!(f, "OS Mode({b2})"),
-                    },
-                    special_fn::BT_PAIRING => "BT Pairing",
-                    special_fn::FN_TOGGLE => "Fn Toggle",
-                    special_fn::WASD_SWAP => "WASD Swap",
-                    special_fn::NKRO_TOGGLE => "NKRO Toggle",
-                    special_fn::FN_LOCK => "Fn Lock",
-                    special_fn::REPORT_MODE => "Report Mode",
-                    special_fn::KNOB_MODE_TOGGLE => "Knob Mode Toggle",
-                    special_fn::RCTRL_MOD => "RCtrl Modifier",
-                    _ => return write!(f, "SpecialFn({sub},{b2},{b3})"),
-                };
-                write!(f, "{name}")
+                if *sub == special_fn::OS_MODE {
+                    return match b2 {
+                        0 => write!(f, "OS: Windows"),
+                        1 => write!(f, "OS: Mac"),
+                        2 => write!(f, "OS: iOS"),
+                        3 => write!(f, "OS: Cycle"),
+                        _ => write!(f, "OS Mode({b2})"),
+                    };
+                }
+                match SPECIAL_FN_NAMES.iter().find(|(id, _)| id == sub) {
+                    Some((_, name)) => write!(f, "{name}"),
+                    None => write!(f, "SpecialFn({sub},{b2},{b3})"),
+                }
             }
             KeyAction::ProfileSwitch { action, index } => match action {
                 1 => write!(f, "Profile Next"),
@@ -356,20 +375,21 @@ impl fmt::Display for KeyAction {
                 }
             }
             KeyAction::LedControl { data } => {
-                let name = match (data[0], data[1], data[2]) {
-                    (1, _, _) => "LED Mode Cycle",
-                    (2, 1, 0) => "LED Brightness Up",
-                    (2, 2, 0) => "LED Brightness Down",
-                    (3, 1, 0) => "LED Speed Up",
-                    (3, 2, 0) => "LED Speed Down",
-                    (5, _, _) => "LED Direction",
-                    (6, _, _) => "LED Layer Select",
-                    _ => "",
+                // The b1-only actions ignore b2/b3, so they are matched on b1 alone
+                // and deliberately kept out of the round-tripping table.
+                let wide = match data[0] {
+                    1 => Some("LED Mode Cycle"),
+                    5 => Some("LED Direction"),
+                    6 => Some("LED Layer Select"),
+                    _ => None,
                 };
-                if name.is_empty() {
-                    write!(f, "LedControl({},{},{})", data[0], data[1], data[2])
-                } else {
-                    write!(f, "{name}")
+                let exact = LED_CONTROL_NAMES
+                    .iter()
+                    .find(|(bytes, _)| bytes == data)
+                    .map(|(_, name)| *name);
+                match exact.or(wide) {
+                    Some(name) => write!(f, "{name}"),
+                    None => write!(f, "LedControl({},{},{})", data[0], data[1], data[2]),
                 }
             }
             KeyAction::Knob { data } => {
@@ -426,6 +446,34 @@ impl FromStr for KeyAction {
             "disabled" | "none" | "off" => return Ok(KeyAction::Disabled),
             "fn" => return Ok(KeyAction::Fn),
             _ => {}
+        }
+
+        // The named firmware actions, from the same tables `Display` prints, so
+        // anything the listing shows can be written back.
+        if let Some((sub, _)) = SPECIAL_FN_NAMES
+            .iter()
+            .find(|(_, name)| name.eq_ignore_ascii_case(s))
+        {
+            return Ok(KeyAction::SpecialFn {
+                sub: *sub,
+                b2: 0,
+                b3: 0,
+            });
+        }
+        if let Some((data, _)) = LED_CONTROL_NAMES
+            .iter()
+            .find(|(_, name)| name.eq_ignore_ascii_case(s))
+        {
+            return Ok(KeyAction::LedControl { data: *data });
+        }
+        for (b2, label) in [(0u8, "Windows"), (1, "Mac"), (2, "iOS"), (3, "Cycle")] {
+            if s.eq_ignore_ascii_case(&format!("OS: {label}")) {
+                return Ok(KeyAction::SpecialFn {
+                    sub: special_fn::OS_MODE,
+                    b2,
+                    b3: 0,
+                });
+            }
         }
 
         // Mouse button: "Mouse1", "mouse(2)"
@@ -1194,5 +1242,73 @@ mod tests {
         let a = KeyAction::LedControl { data: [2, 1, 0] };
         assert_eq!(a.to_config_bytes(), [13, 2, 1, 0]);
         assert_eq!(KeyAction::from_config_bytes(a.to_config_bytes()), a);
+    }
+}
+
+#[cfg(test)]
+mod display_parse_roundtrip {
+    use super::*;
+
+    /// Anything the listing prints must parse back, or a value can be read off the
+    /// device and shown to the user but never written again — which is exactly the
+    /// state the encoder's mode toggle was in.
+    #[test]
+    fn every_printed_action_parses_back() {
+        let cases = [
+            KeyAction::Disabled,
+            KeyAction::Fn,
+            KeyAction::Key(HidUsage::new(0x04)),
+            KeyAction::Consumer(0x00E9),
+            KeyAction::SpecialFn {
+                sub: special_fn::KNOB_MODE_TOGGLE,
+                b2: 0,
+                b3: 0,
+            },
+            KeyAction::SpecialFn {
+                sub: special_fn::WASD_SWAP,
+                b2: 0,
+                b3: 0,
+            },
+            KeyAction::SpecialFn {
+                sub: special_fn::WIN_LOCK,
+                b2: 0,
+                b3: 0,
+            },
+            KeyAction::LedControl { data: [2, 1, 0] },
+        ];
+        // Every entry of both shared tables, plus the hand-picked cases above.
+        let table_cases: Vec<KeyAction> = SPECIAL_FN_NAMES
+            .iter()
+            .map(|(sub, _)| KeyAction::SpecialFn {
+                sub: *sub,
+                b2: 0,
+                b3: 0,
+            })
+            .chain(
+                LED_CONTROL_NAMES
+                    .iter()
+                    .map(|(data, _)| KeyAction::LedControl { data: *data }),
+            )
+            .chain((0..=3u8).map(|b2| KeyAction::SpecialFn {
+                sub: special_fn::OS_MODE,
+                b2,
+                b3: 0,
+            }))
+            .collect();
+
+        let mut broken = Vec::new();
+        for a in cases.into_iter().chain(table_cases) {
+            let shown = a.to_string();
+            match shown.parse::<KeyAction>() {
+                Ok(back) if back == a => {}
+                Ok(back) => broken.push(format!("{shown:?} -> {back:?} (wanted {a:?})")),
+                Err(e) => broken.push(format!("{shown:?} does not parse: {e}")),
+            }
+        }
+        assert!(
+            broken.is_empty(),
+            "not round-tripping:\n  {}",
+            broken.join("\n  ")
+        );
     }
 }
