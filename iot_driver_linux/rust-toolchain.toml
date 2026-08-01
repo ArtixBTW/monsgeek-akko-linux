@@ -1,0 +1,16 @@
+# Pins the toolchain for this workspace so CI and local checks agree.
+#
+# CI installs `dtolnay/rust-toolchain@stable`, which floats: when stable moved
+# from 1.96 to 1.97 a new `clippy::question_mark` case turned master red with no
+# code change, and local clippy (still 1.96) could not reproduce it. rustup
+# honours this file for anything run inside this directory, so both sides now
+# resolve to the same compiler whatever `stable` happens to be.
+#
+# Scoped to iot_driver_linux on purpose: `akko-hid-bpf/akko-ebpf` is built with
+# nightly (see the "Verify BPF" job), and a repo-root pin would override that.
+#
+# Bump deliberately: raise the channel, run `make check`, fix what the newer
+# clippy finds, and commit the two together.
+[toolchain]
+channel = "1.97"
+components = ["rustfmt", "clippy"]
