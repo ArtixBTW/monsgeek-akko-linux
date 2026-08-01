@@ -1515,19 +1515,15 @@ impl KeyboardInterface {
                 layer: layer.get(),
             };
 
-            match self.transport.query_raw(
+            // `?`, never a skip. Callers index this buffer by `key_index * 4`, so
+            // dropping 64 bytes mid-stream slides every later key's binding onto the
+            // wrong key — and it still looks like a successful read.
+            let resp = self.transport.query_raw(
                 self.commands.get_keymatrix,
                 query.as_bytes(),
                 ChecksumType::Bit7,
-            ) {
-                Ok(resp) => {
-                    all_data.extend_from_slice(&resp);
-                }
-                // Never skip a page. Callers index this buffer by `key_index * 4`,
-                // so dropping 64 bytes mid-stream slides every later key's binding
-                // onto the wrong key — and it still looks like a successful read.
-                Err(e) => return Err(e.into()),
-            }
+            )?;
+            all_data.extend_from_slice(&resp);
         }
 
         if all_data.is_empty() {
@@ -1564,16 +1560,11 @@ impl KeyboardInterface {
                 magic: 0xFF,
                 page: page as u8,
             };
-            match self
-                .transport
-                .query_raw(cmd::GET_FN, query.as_bytes(), ChecksumType::Bit7)
-            {
-                Ok(resp) => {
-                    all_data.extend_from_slice(&resp);
-                }
-                // Same offset hazard as `get_keymatrix`.
-                Err(e) => return Err(e.into()),
-            }
+            // Same offset hazard as `get_keymatrix`.
+            let resp =
+                self.transport
+                    .query_raw(cmd::GET_FN, query.as_bytes(), ChecksumType::Bit7)?;
+            all_data.extend_from_slice(&resp);
         }
 
         if all_data.is_empty() {
@@ -1682,29 +1673,25 @@ impl KeyboardInterface {
                 page,
             };
 
-            match self
-                .transport
-                .query_raw(cmd::GET_MACRO, query.as_bytes(), ChecksumType::Bit7)
-            {
-                Ok(resp) => {
-                    // Skip command echo if present (some transports may add it)
-                    let start = if !resp.is_empty() && resp[0] == cmd::GET_MACRO {
-                        1
-                    } else {
-                        0
-                    };
-                    if resp.len() > start {
-                        all_data.extend_from_slice(&resp[start..]);
-                    }
+            // A skipped page shifts the rest of the macro, and the shifted bytes then
+            // parse as a plausible-but-wrong keystroke sequence — so propagate.
+            let resp =
+                self.transport
+                    .query_raw(cmd::GET_MACRO, query.as_bytes(), ChecksumType::Bit7)?;
 
-                    // Check for 4 consecutive zeros (end marker)
-                    if resp[start..].windows(4).any(|w| w == [0, 0, 0, 0]) {
-                        break;
-                    }
-                }
-                // A skipped page shifts the rest of the macro, and the shifted
-                // bytes then parse as a plausible-but-wrong keystroke sequence.
-                Err(e) => return Err(e.into()),
+            // Skip command echo if present (some transports may add it)
+            let start = if !resp.is_empty() && resp[0] == cmd::GET_MACRO {
+                1
+            } else {
+                0
+            };
+            if resp.len() > start {
+                all_data.extend_from_slice(&resp[start..]);
+            }
+
+            // Check for 4 consecutive zeros (end marker)
+            if resp[start..].windows(4).any(|w| w == [0, 0, 0, 0]) {
+                break;
             }
         }
 
